@@ -1,0 +1,164 @@
+Overfitting and Underfitting –
+=======================================================
+
+Introduction
+------------
+In supervised learning, the goal is to build models that generalize well to unseen data.
+Two major challenges are:
+- Underfitting: Model is too simple
+- Overfitting: Model is too complex
+
+These problems are best understood through the bias-variance trade-off.
+
+---------------------------------------------------
+1. Underfitting – High Bias, Low Variance
+---------------------------------------------------
+
+Definition:
+Model is unable to capture the underlying structure of data. Performs poorly on both training and test sets.
+
+Symptoms:
+- High training error
+- High test error
+
+Causes:
+- Model too simple (e.g., linear model for non-linear patterns)
+- Insufficient features
+- Too much regularization
+- Training stopped too early
+
+Why Low Variance?
+- A simple model doesn’t react much to different datasets.
+- Its predictions remain largely the same no matter the training data.
+- It makes consistent errors → stable but wrong.
+
+Fixes:
+- Use a more complex model
+- Add polynomial or interaction features
+- Reduce regularization strength
+- Train longer
+
+---------------------------------------------------
+2. Overfitting – Low Bias, High Variance
+---------------------------------------------------
+
+Definition:
+
+Model learns not only the patterns but also the noise in the training data.
+Performs very well on training but poorly on test data.
+
+Symptoms:
+- Very low training error
+- High test error
+
+Causes:
+- Excessively complex model
+- Too many features
+- Too few training samples
+- No regularization
+- Long training without monitoring
+
+Why High Variance?
+- A complex model is highly sensitive to training data.
+- Small changes in training samples → large changes in predictions.
+
+Fixes:
+- Use regularization (L1/L2)
+- Use a simpler model
+- Collect more data
+- Use early stopping or dropout
+- Reduce feature count
+
+---------------------------------------------------
+3. Bias-Variance Trade-off
+---------------------------------------------------
+
+- Bias: Error due to incorrect assumptions (underfitting)
+- Variance: Error due to sensitivity to data fluctuations (overfitting)
+
+Goal: Find a model with low bias and low variance → good generalization
+
+Summary:
+- Underfitting: High Bias, Low Variance
+- Overfitting: Low Bias, High Variance
+
+---------------------------------------------------
+4. Regularization – L1 and L2
+---------------------------------------------------
+
+Used to reduce overfitting by penalizing large weights:
+
+- L2 (Ridge): Adds λ * ||w||² → encourages small weights
+- L1 (Lasso): Adds λ * ||w||₁ → encourages sparsity (feature selection)
+
+Tuning:
+- Use cross-validation to choose the regularization parameter λ
+
+---------------------------------------------------
+5. Early Stopping
+---------------------------------------------------
+
+- Stop training when validation loss starts increasing
+- Prevents overfitting while ensuring learning
+- Often used in deep learning
+
+
+---------------------------------------------------
+6. Cross-Validation
+---------------------------------------------------
+
+Purpose: To evaluate how well a model generalizes
+
+- Underfitting: Low train and validation scores
+- Overfitting: High train score, low validation score
+
+Types:
+
+- K-Fold, Stratified K-Fold, Leave-One-Out
+
+---------------------------------------------------
+7. Model Capacity and Complexity
+---------------------------------------------------
+
+- Model capacity = flexibility in learning patterns
+- Low capacity → underfit
+- High capacity → overfit
+
+Balance model complexity with data quantity and regularization.
+
+---------------------------------------------------
+8. Techniques to Prevent Overfitting
+---------------------------------------------------
+
+- Regularization (L1, L2)
+- Early stopping
+- Dropout (for neural networks)
+- Reduce features
+- Add more data
+- Use simpler model
+- Cross-validation
+- Bagging/Boosting
+
+---------------------------------------------------
+9. Techniques to Prevent Underfitting
+---------------------------------------------------
+
+- Use more complex models
+- Add meaningful features
+- Train for more epochs
+- Reduce regularization
+- Use lower-bias algorithms
+
+---------------------------------------------------
+10. Summary Table
+
+| Property       | Underfitting        | Overfitting         |
+|----------------|---------------------|----------------------|
+| Train Error    | High                | Low                  |
+| Test Error     | High                | High                 |
+| Bias           | High                | Low                  |
+| Variance       | Low                 | High                 |
+| Model          | Too simple          | Too complex          |
+| Fix            | Add complexity      | Simplify, regularize |
+
+

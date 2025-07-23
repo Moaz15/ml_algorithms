@@ -1,0 +1,83 @@
+Optimization and Gradient Descent
+---------------------------------
+What is Optimization?
+
+Optimization in machine learning refers to the process of finding the best parameters (like weights in a model) that 
+minimize or maximize a specific objective function (usually a loss or cost function).
+
+In supervised learning, this typically means:
+- Minimizing the loss function to improve prediction accuracy.
+
+For example, in logistic regression, we minimize the cross-entropy loss.
+
+What is Gradient Descent?
+---------------------------
+
+Gradient Descent is the most commonly used optimization algorithm in machine learning. 
+It is an iterative method that updates parameters in the direction of steepest descent (negative gradient) 
+to minimize the loss function.
+
+Basic update rule:
+    θ := θ - α * ∇J(θ)
+
+Where:
+- θ: model parameters (e.g., weights w and bias b)
+- α: learning rate (step size)
+- ∇J(θ): gradient of the cost function with respect to θ
+
+---------------------------
+Types of Gradient Descent:
+---------------------------
+
+1. Batch Gradient Descent:
+   - Uses the entire training dataset to compute the gradient
+   - Pros: Stable convergence  , Suitable for small datasets , 
+   - Cons: Slow for large datasets,High memory usage , Poor scalability
+
+2. Stochastic Gradient Descent (SGD):
+   - Updates parameters using one data point at a time
+   - Pros: Fast updates, good for large datasets
+   - Cons: High variance, noisy updates
+
+3. Mini-Batch Gradient Descent:
+   - Uses a small batch of data points for each update
+   - Trade-off between speed and stability
+   - Widely used in deep learning
+
+Choosing the Learning Rate:
+
+- Too small: slow convergence
+- Too large: overshooting, possible divergence
+- Often tuned manually or with scheduling
+
+Convergence and Termination:
+
+Stop when:
+- Loss is below a threshold
+- Gradient norm is very small
+- Maximum number of iterations reached
+- Validation loss starts increasing (early stopping)
+
+Limitations of Gradient Descent:
+
+- Sensitive to learning rate
+- Can get stuck in local minima (for non-convex functions)
+- Slow convergence near flat regions
+- Poor scaling with very large datasets (batch GD)
+
+Improvements & Variants:
+
+- Momentum: Accelerates updates in the right direction
+- AdaGrad: Adapts learning rate per parameter
+- RMSProp: Uses exponential moving average of squared gradients
+- Adam (Adaptive Moment Estimation): Combines Momentum + RMSProp
+   - Most widely used optimizer in deep learning
+
+   will focus more later 
+
+Summary:
+
+- Gradient Descent is the backbone of ML optimization
+- It finds the minimum of the loss function by following the negative gradient
+- Comes in different flavors (Batch, SGD, Mini-batch)
+- Modern optimizers like Adam improve convergence and stability

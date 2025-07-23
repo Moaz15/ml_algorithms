@@ -1,0 +1,190 @@
+What is Regularization?
+------------------------
+Regularization is a technique used in machine learning to:
+- Prevent overfitting
+- Improve model generalization to unseen data
+- Control model complexity
+
+It works by adding a penalty term to the loss function to discourage the model from learning overly large weights.
+
+Motivation:
+-----------
+- Complex models with large weights often memorize training data.
+- Regularization encourages simpler models that generalize better.
+- It penalizes weights so that the model stays close to zero unless needed.
+
+------------------------------------------------------
+Why Do We Need Regularization?
+------------------------------------------------------
+1. To prevent overfitting
+2. To reduce model variance
+3. To encourage simpler, more interpretable models
+4. To ensure numerical stability
+5. To handle multicollinearity (in linear models)
+
+------------------------------------------------------
+Types of Regularization
+------------------------------------------------------
+
+There are two most common forms:
+
+1. L2 Regularization (Ridge Regression)
+2. L1 Regularization (Lasso Regression)
+
+Sometimes, both are combined in Elastic Net.
+
+------------------------------------------------------
+1. L2 Regularization (Ridge)
+------------------------------------------------------
+
+Definition:
+- Adds a penalty proportional to the **square of the magnitude** of weights.
+- New cost function for logistic regression:
+
+  J(w) = Original_Loss + λ * ∑ wᵢ²  
+       = –log-likelihood + λ * ||w||²
+
+Effect:
+- Shrinks weights toward zero, but doesn’t make them exactly zero.
+- Encourages **smooth solutions** and retains all features.
+- Stabilizes the model (helps with multicollinearity).
+
+Gradient Update:
+- During gradient descent, update rule becomes:
+
+  w := w – α * (∇Loss + 2λw)
+
+Use Case:
+- When all features are important but need to be regularized.
+- When multicollinearity is present.
+
+------------------------------------------------------
+2. L1 Regularization (Lasso)
+------------------------------------------------------
+
+Definition:
+- Adds a penalty proportional to the **absolute value** of weights.
+- New cost function:
+
+  J(w) = Original_Loss + λ * ∑ |wᵢ|  
+       = –log-likelihood + λ * ||w||₁
+
+Effect:
+- Drives some weights **exactly to zero** → leads to **sparse models**
+- Performs **feature selection** automatically
+
+Gradient Update:
+- Not differentiable at zero → subgradient methods used.
+- Results in many zero-weighted features.
+
+Use Case:
+- When feature selection is important.
+- When you suspect many features are irrelevant.
+
+------------------------------------------------------
+3. Elastic Net Regularization
+------------------------------------------------------
+
+Definition:
+- Combines both L1 and L2 regularization:
+
+  J(w) = Loss + α * [λ₁ * ∑ |wᵢ| + λ₂ * ∑ wᵢ²]
+
+Effect:
+- Mixes the benefits:
+  - Sparsity from L1
+  - Stability from L2
+
+Use Case:
+- When you want both regularization and feature selection.
+- Especially helpful in high-dimensional datasets (e.g., gene data, NLP).
+
+------------------------------------------------------
+4. Regularization in Neural Networks
+------------------------------------------------------
+
+In deep learning, overfitting is common due to large model capacity. Regularization methods include:
+
+✅ L2 weight decay  
+✅ Dropout: Randomly drops neurons during training  
+✅ Batch normalization (indirectly acts as regularization)  
+✅ Data augmentation (adds variance to training set)  
+✅ Early stopping  
+
+------------------------------------------------------
+5. Choosing the Regularization Strength (λ)
+------------------------------------------------------
+
+- λ (lambda) is a hyperparameter that controls the strength of the penalty:
+  - λ = 0 → no regularization
+  - λ → ∞ → all weights become 0
+
+- Chosen via:
+  ✅ Cross-validation
+  ✅ Grid search
+  ✅ Regularization path (LARS)
+
+Tradeoff:
+- High λ → underfitting (model too constrained)
+- Low λ → risk of overfitting
+
+------------------------------------------------------
+6. Effects on Model Parameters
+------------------------------------------------------
+
+| Metric               | L1 (Lasso)     | L2 (Ridge)     |
+|----------------------|----------------|----------------|
+| Shrinks weights?     | Yes            | Yes            |
+| Drives to zero?      | Yes (sparse)   | No             |
+| Feature selection?   | Yes            | No             |
+| Handles multicollinearity? | Moderate | Excellent      |
+
+------------------------------------------------------
+7. Visualization Insight
+------------------------------------------------------
+
+In 2D weight space:
+
+- L2 constraint → circle
+- L1 constraint → diamond
+
+The loss contours (ellipses) intersect these shapes differently:
+- L1 → often hits corners → leads to zero weights
+- L2 → tends to shrink all weights uniformly
+
+------------------------------------------------------
+8. When to Use What?
+------------------------------------------------------
+
+| Scenario                                    | Recommended |
+|---------------------------------------------|-------------|
+| Many irrelevant features                    | L1          |
+| All features important                      | L2          |
+| Multicollinearity present                   | L2          |
+| Need for feature selection                  | L1 or Elastic Net |
+| Small dataset with many features            | L1 or Elastic Net |
+| Deep learning                               | L2 + Dropout |
+
+------------------------------------------------------
+9. Alternatives and Extensions
+------------------------------------------------------
+
+✅ Group Lasso → for grouped features  
+✅ Dropout (in NN) → random regularization  
+✅ Variational Bayesian Priors → Bayesian regularization  
+✅ Max-Norm → cap weights by a hard threshold
+
+------------------------------------------------------
+10. Summary
+------------------------------------------------------
+
+Regularization is critical for building **robust**, **generalizable**, and **interpretable** models.
+
+- It adds a constraint that prevents models from going to extremes.
+- L1 encourages **sparse**, interpretable models.
+- L2 stabilizes models, especially in the presence of collinearity.
+- Elastic Net blends both worlds.
+- λ controls how aggressively we regularize and must be tuned.
+- Essential for both classical models and deep learning systems.
+
+

@@ -1,0 +1,104 @@
+#  Logistic Regression with L2 Regularization – Full Mathematical Derivation 
+## 🎯 1. Problem Statement
+We are solving a **binary classification** problem.  
+Given:
+- Input vector: x ∈ ℝⁿ
+- Output label: y ∈ {0, 1}
+
+Our goal is to learn a function that estimates the probability:
+P(y = 1 | x)
+
+---
+## 🔢 2. Hypothesis Function (Sigmoid)
+We start with a linear function:
+
+z = θᵀx + b
+
+To map the real-valued output into a probability, we use the **sigmoid function**:
+
+σ(z) = 1 / (1 + e^(−z))
+
+So our predicted probability is:
+
+ŷ = hθ(x) = σ(θᵀx + b)
+
+---
+
+##  3. Interpreting the Output
+- ŷ = P(y = 1 | x)
+- 1 − ŷ = P(y = 0 | x)
+
+---
+
+## 📉 4. Loss Function: Binary Cross Entropy
+We use cross-entropy to measure the mismatch between predicted probability and true label.
+
+For one example:
+
+L(ŷ, y) = −[y log(ŷ) + (1 − y) log(1 − ŷ)]
+
+For all m examples:
+
+J(θ) = −(1/m) ∑ [yᵢ log(ŷᵢ) + (1 − yᵢ) log(1 − ŷᵢ)]
+
+---
+
+## ⚠️ 5. The Overfitting Problem
+Without any constraint on θ, the model can assign **very large weights** to fit training data perfectly — even on noise.  
+This causes **overfitting**, leading to **high variance** and poor generalization.
+
+---
+
+## 🛡️ 6. Adding L2 Regularization
+To prevent large weights, we add an L2 penalty:
+
+J(θ) = CrossEntropyLoss + (λ / 2m) ∑ θⱼ²
+
+Where:
+- λ: regularization strength
+- Bias b is **not penalized**
+
+---
+
+## 🔁 7. Gradient Derivation with Regularization
+
+Let:
+
+error = ŷ − y
+
+Then:
+
+**Gradient of loss w.r.t. weights:**
+
+∂J/∂θ = (1/m) Xᵀ(error) + (λ/m) θ
+
+**Gradient of loss w.r.t. bias:**
+
+∂J/∂b = (1/m) ∑ (ŷᵢ − yᵢ)
+
+---
+
+## 🔃 8. Parameter Update Rules (Gradient Descent)
+
+θ := θ − α [(1/m) Xᵀ(error) + (λ/m) θ]  
+b := b − α (1/m) ∑ (ŷᵢ − yᵢ)
+
+Where:
+- α: learning rate
+
+---
+
+## 📊 9. Final Objective Function
+
+J(θ) = −(1/m) ∑ [yᵢ log(ŷᵢ) + (1 − yᵢ) log(1 − ŷᵢ)] + (λ / 2m) ∑ θⱼ²
+
+---
+
+## ✅ 10. Summary
+- Logistic regression predicts P(y = 1 | x) using the sigmoid of a linear combination.
+- Cross-entropy loss penalizes incorrect probabilities.
+- L2 regularization keeps weights small to reduce overfitting.
+- Model is trained using gradient descent with regularized gradients.
+- The final model is simple, robust, and interpretable.
+
+You’ve now fully derived logistic regression with L2 regularization — end to end!

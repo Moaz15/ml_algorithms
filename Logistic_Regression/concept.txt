@@ -1,0 +1,187 @@
+Logistic Regression is a supervised learning algorithm used for binary classification problems
+Unlike Linear Regression, which predicts a continuous outcome, Logistic Regression predicts the probability of a binary event (e.g., will a user click or not).
+
+Logistic Regression – Assumptions 
+
+1. Binary or Categorical Outcome
+- The dependent variable must be binary (0/1) for binary logistic regression or categorical for extensions.
+- For 3+ classes: use Multinomial or Ordinal Logistic Regression.
+- Continuous outcomes violate this assumption as logistic regression models discrete class probabilities.
+
+2. Linearity of Logit with Predictors
+- The log-odds (logit) of the outcome should have a linear relationship with the independent variables:
+  log(p / (1 - p)) = β₀ + β₁x₁ + β₂x₂ + ... + βₙxₙ
+- Does NOT require predictors to have a linear relationship with the outcome directly.
+- Check using: Box-Tidwell test, logit plots, or residual analysis.
+- Fix non-linear patterns using: polynomial terms, splines, log/sqrt transformations, or interaction terms.
+
+3. Independence of Observations
+- Each observation should be independent of all others.
+- Violations include time series, clustered data, repeated measures, spatial or network correlation.
+- Detection: Durbin-Watson test (time), ICC (clusters), residual pattern analysis.
+- Fix using: Mixed Effects Models, Generalized Estimating Equations (GEE), or robust standard errors.
+
+4. No Perfect Multicollinearity
+- Predictors should not be perfectly or highly linearly correlated.
+- Perfect or high correlation leads to unstable or non-estimable coefficients.
+- Detection:
+  - Correlation matrix
+  - Variance Inflation Factor (VIF > 5 or 10)
+  - Condition Index > 30
+- Fix using: dropping redundant variables, combining features, regularization (Ridge/Lasso), PCA.
+
+5. Adequate Sample Size
+- Rule of thumb: 10–15 observations per predictor variable.
+- Rare class: minimum 10 events per predictor in the minority class.
+- Small samples lead to: poor convergence, unstable estimates, overfitting, or complete separation.
+- Fixes: Penalized likelihood (e.g., Firth’s correction), Exact Logistic Regression, reducing model complexity, or collecting more data.
+
+6. No Extreme Outliers
+- Outliers can distort model coefficients and reduce predictive accuracy.
+- Types:
+  - High leverage points (extreme predictor values)
+  - High influence points (large effect on coefficients)
+- Detection tools: Cook’s Distance, Hat values, Standardized residuals, DfBeta.
+- Remedies:
+  - Investigate and clean data
+  - Use robust logistic regression
+  - Transform features
+  - Carefully remove if clearly erroneous
+
+Summary:
+Logistic Regression assumes:
+- A binary/categorical outcome
+- Linear relationship between logit and predictors
+- Independent observations
+- No perfect multicollinearity
+- Sufficient sample size
+- No extreme outliers
+
+Meeting these assumptions ensures stable, interpretable, and valid results.
+
+
+Logistic Regression – Complete Conceptual Flow
+
+========================================
+1. Geometric Interpretation and Objective Function
+========================================
+
+Goal: Find a decision boundary (a hyperplane) that best separates the two classes.
+
+- Logistic regression models:
+  P(y = 1 | x) = σ(wᵗx + b)
+  where σ(z) is the sigmoid function.
+
+- wᵗx + b represents the signed distance from the decision boundary.
+- The sigmoid maps this distance to a probability between 0 and 1.
+
+Loss Function:
+To learn w, b, we minimize the negative log-likelihood, also called binary cross-entropy:
+J(w, b) = –(1/m) ∑ [ y⁽ⁱ⁾ log(ŷ⁽ⁱ⁾) + (1 – y⁽ⁱ⁾) log(1 – ŷ⁽ⁱ⁾) ]
+
+
+========================================
+2. Why Not Distance Maximization?
+========================================
+
+Distance Maximization (like in SVM) tries to maximize the margin between classes. However:
+
+- It does not output probabilities
+- It’s sensitive to outliers
+- It’s non-convex and hard to optimize
+- It lacks a probabilistic foundation
+
+Solution: Use log-likelihood based approach which:
+- Is convex
+- Penalizes wrong confident predictions
+- Gives interpretable probability outputs
+
+
+========================================
+3. Need for Sigmoid – From Geometry to Probability
+========================================
+
+Problem:
+A linear model outputs unbounded values in (−∞, +∞), which cannot represent valid probabilities.
+
+Solution:
+Use the sigmoid function:
+σ(z) = 1 / (1 + e^(−z)), where z = wᵗx + b
+
+Purpose:
+- Maps real-valued inputs (distance from boundary) to the probability range (0, 1)
+
+Geometric Interpretation:
+- z = wᵗx + b is the signed distance from the decision boundary (hyperplane)
+- Sigmoid transforms this distance into a smooth probability
+
+Why sigmoid is used:
+- Converts geometry into probability
+- Differentiable and convex, enabling gradient descent
+- Gives interpretable, probabilistic outputs for classification
+
+
+========================================
+4. Why Sigmoid Must Be Monotonic
+========================================
+
+Definition:
+A monotonic function is one that is either entirely non-increasing or non-decreasing.
+The sigmoid function used in logistic regression is strictly increasing:
+σ(z) = 1 / (1 + e^(−z))
+
+Benefits of Monotonicity:
+1. Rank Preservation: More positive z → higher probability
+2. Predictable Thresholding: Thresholds like 0.5 work reliably
+3. Smooth Optimization: Gradient always positive, aiding convergence
+4. Interpretability: Higher distance → higher probability for class 1
+
+
+========================================
+5. Loss vs Cost Function Clarified
+========================================
+
+Loss Function:
+- Measures prediction error on a single training example
+- Binary Cross-Entropy Loss:
+  L(ŷ, y) = – [ y log(ŷ) + (1 – y) log(1 – ŷ) ]
+
+Cost Function:
+- Average of loss across all training examples
+  J(w, b) = (1/m) ∑ L(ŷ⁽ⁱ⁾, y⁽ⁱ⁾)
+
+Summary:
+- Loss = Error for one sample
+- Cost = Average error across dataset
+
+
+========================================
+6. Statistical Objective: Derivation via Maximum Likelihood Estimation
+========================================
+
+Step 1: Bernoulli Model for Individual Predictions
+P(y | x) = ŷ^y * (1 – ŷ)^(1 – y)
+Where ŷ = σ(wᵗx + b)
+
+Step 2: Likelihood of Full Dataset (assuming independent samples)
+L(w) = ∏ ŷ⁽ⁱ⁾^y⁽ⁱ⁾ * (1 – ŷ⁽ⁱ⁾)^(1 – y⁽ⁱ⁾)
+
+Step 3: Log-Likelihood
+log L(w) = ∑ [ y⁽ⁱ⁾ log(ŷ⁽ⁱ⁾) + (1 – y⁽ⁱ⁾) log(1 – ŷ⁽ⁱ⁾) ]
+Why take log:
+- Converts product to sum (easier to optimize)
+- Improves numerical stability
+
+Step 4: Loss Function (Negative Log-Likelihood)
+L(ŷ, y) = – [ y log(ŷ) + (1 – y) log(1 – ŷ) ]
+J(w, b) = (1/m) ∑ L(ŷ⁽ⁱ⁾, y⁽ⁱ⁾)
+
+Step 5: Why Maximize Log-Likelihood
+- Based on Maximum Likelihood Estimation (MLE)
+- Finds parameters that make observed labels most probable
+- Convex and differentiable → suitable for gradient descent
+- Minimizing its negative (log loss) gives probability-calibrated outputs
+
+
+Likelihood → Log-Likelihood → Negative Log-Likelihood → Cross-Entropy Loss
+

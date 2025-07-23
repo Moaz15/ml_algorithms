@@ -1,0 +1,58 @@
+What is Convexity and Convex Functions
+--------------------------------------
+
+Convexity is a mathematical property of a function where, for any two points on the function,
+the line segment connecting them lies above or on the curve of the function.
+
+Formally, a function f(x) is convex if:
+    f(λx₁ + (1 – λ)x₂) ≤ λf(x₁) + (1 – λ)f(x₂)
+for all x₁, x₂ and λ ∈ [0, 1].
+
+Geometrically, convex functions are "bowl-shaped" — they curve upwards and do not have local dips or valleys.
+
+Examples of convex functions:
+- f(x) = x^2
+- f(x) = e^x
+- f(x) = -log(x) on x > 0
+
+Non-convex example:
+- f(x) = -x^2 (concave)
+
+-----------------------------------------------------
+How to Prove Whether the Function is Convex or Not?
+-----------------------------------------------------
+
+A. For Single-Variable Functions:
+Use the second derivative test:
+    If f''(x) ≥ 0 for all x → f(x) is convex
+
+B. For Multivariable Functions:
+Use the Hessian matrix (second partial derivatives):
+    - If the Hessian is positive semi-definite (all eigenvalues ≥ 0), the function is convex
+
+Shortcuts:
+- Linear, quadratic, exponential, log-sum-exp functions are known convex functions
+- Cross-entropy and squared error loss are convex in machine learning
+
+-----------------------------------
+Why Do We Need a Convex Loss Function?
+-----------------------------------
+
+In machine learning, loss functions are minimized using optimization methods like gradient descent.
+
+Benefits of convex loss functions:
+- Convex loss functions guarantee a unique global minimum
+- No local minima trap the optimizer
+- Convergence is stable and efficient
+- Theoretical guarantees for correctness and speed
+
+Example:
+- Logistic Regression uses the cross-entropy loss, which is convex with respect to z = wᵗx
+- This ensures we can optimize the parameters reliably
+
+Summary:
+- Convexity = guaranteed stability and optimality
+- Test via second derivative or Hessian matrix
+- Essential for successful optimization in ML models
+
+
