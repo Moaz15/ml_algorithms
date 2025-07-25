@@ -38,7 +38,7 @@ Sometimes, both are combined in Elastic Net.
 ------------------------------------------------------
 
 Definition:
-- Adds a penalty proportional to the **square of the magnitude** of weights.
+- Adds a penalty proportional to the square of the magnitude of weights.
 - New cost function for logistic regression:
 
   J(w) = Original_Loss + λ * ∑ wᵢ²  
@@ -46,7 +46,7 @@ Definition:
 
 Effect:
 - Shrinks weights toward zero, but doesn’t make them exactly zero.
-- Encourages **smooth solutions** and retains all features.
+- Encourages smooth solutions and retains all features.
 - Stabilizes the model (helps with multicollinearity).
 
 Gradient Update:
@@ -63,15 +63,15 @@ Use Case:
 ------------------------------------------------------
 
 Definition:
-- Adds a penalty proportional to the **absolute value** of weights.
+- Adds a penalty proportional to the absolute value of weights.
 - New cost function:
 
   J(w) = Original_Loss + λ * ∑ |wᵢ|  
        = –log-likelihood + λ * ||w||₁
 
 Effect:
-- Drives some weights **exactly to zero** → leads to **sparse models**
-- Performs **feature selection** automatically
+- Drives some weights exactly to zero → leads to sparse models
+- Performs feature selection automatically
 
 Gradient Update:
 - Not differentiable at zero → subgradient methods used.
@@ -178,13 +178,14 @@ The loss contours (ellipses) intersect these shapes differently:
 10. Summary
 ------------------------------------------------------
 
-Regularization is critical for building **robust**, **generalizable**, and **interpretable** models.
+Regularization is critical for building robust, generalizable, and interpretable models.
 
 - It adds a constraint that prevents models from going to extremes.
-- L1 encourages **sparse**, interpretable models.
+- L1 encourages sparse, interpretable models.
 - L2 stabilizes models, especially in the presence of collinearity.
 - Elastic Net blends both worlds.
 - λ controls how aggressively we regularize and must be tuned.
 - Essential for both classical models and deep learning systems.
 
 
+How to Choose λ (Regularization Strength) will focus more on that later . 
