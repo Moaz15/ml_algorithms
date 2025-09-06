@@ -31,8 +31,8 @@ Types of Gradient Descent:
 
 1. Batch Gradient Descent:
    - Uses the entire training dataset to compute the gradient
-   - Pros: Stable convergence  , Suitable for small datasets , 
-   - Cons: Slow for large datasets,High memory usage , Poor scalability
+   - Pros: Stable convergence , Suitable for small datasets , 
+   - Cons: Slow for large datasets, High memory usage , Poor scalability
 
 2. Stochastic Gradient Descent (SGD):
    - Updates parameters using one data point at a time

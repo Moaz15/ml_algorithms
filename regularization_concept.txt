@@ -78,6 +78,7 @@ Gradient Update:
 - Results in many zero-weighted features.
 
 Use Case:
+
 - When feature selection is important.
 - When you suspect many features are irrelevant.
 
@@ -189,3 +190,68 @@ Regularization is critical for building robust, generalizable, and interpretable
 
 
 How to Choose λ (Regularization Strength) will focus more on that later . 
+
+
+Why L1 Regularization Creates Sparse Weights
+=============================================
+
+1. The Core Idea
+----------------
+L1 regularization modifies the cost function by adding the absolute value of the weights:
+
+    J(w) = Loss(w) + λ ∑ |wᵢ|
+
+- The L1 penalty adds a "constant pull" toward zero because the derivative of |w| is:
+    ∂|w|/∂w = +1 if w > 0
+              –1 if w < 0
+              [–1, +1] if w = 0
+
+- This means even very small weights are pushed strongly toward zero, unlike L2.
+
+Example:
+---------
+Suppose λ = 0.5, current weight w = 0.1, and ∂Loss/∂w = 0.2.
+Update: w = 0.1 – η(0.2 + 0.5 * sign(0.1)).
+
+If η = 0.3, w = 0.1 – 0.21 = -0.11. Next step will push it even closer to zero.
+
+---
+
+2. Soft-Thresholding Effect
+----------------------------
+The L1 update rule is:
+
+    w := w - η [ ∂Loss/∂w + λ sign(w) ]
+
+If |∂Loss/∂w| < λ, the penalty term dominates, and w is set to zero.
+
+Soft-thresholding formula:
+    w_new = sign(w) * max(0, |w| - ηλ)
+
+Example:
+---------
+Let η = 0.1, λ = 0.5, w = 0.04.
+|w| - ηλ = 0.04 - 0.05 = -0.01 → clipped to 0.
+So w_new = 0.
+
+---
+
+3. Comparison with L2 Regularization
+-------------------------------------
+- L2 penalty (λw²) gradient = 2λw.
+- As w → 0, gradient → 0. It shrinks weights but never sets them exactly to zero.
+- L1 gradient is constant ±λ, which forces small weights to hit exactly zero.
+
+Example:
+---------
+For w = 0.01, λ = 0.5:
+- L2 gradient = 2 * 0.5 * 0.01 = 0.01 (tiny update).
+- L1 gradient = 0.5 (constant strong update).
+
+
+
+Summary:
+---------
+- L1’s constant gradient (±λ) pushes small weights to zero (sparsity).
+- L2 shrinks weights but never sets them exactly to zero.
+- L1 is great for feature selection in high-dimensional data.

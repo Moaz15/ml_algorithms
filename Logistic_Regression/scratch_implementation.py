@@ -1,3 +1,4 @@
+#scratch implementation 
 import numpy as np 
 
 class LogisticRegressionScratch:
@@ -49,14 +50,5 @@ class LogisticRegressionScratch:
     def predict(self,X,threshold = 0.5):
         return(self.predict_prob(X) >=threshold).astype(int)
     
-
-
-
-
-
-        
-
-
-
 
 

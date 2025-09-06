@@ -1,5 +1,6 @@
 #  Logistic Regression with L2 Regularization – Full Mathematical Derivation 
-## 🎯 1. Problem Statement
+#  1. Problem Statement
+
 We are solving a **binary classification** problem.  
 Given:
 - Input vector: x ∈ ℝⁿ
@@ -13,7 +14,6 @@ P(y = 1 | x)
 We start with a linear function:
 
 z = θᵀx + b
-
 To map the real-valued output into a probability, we use the **sigmoid function**:
 
 σ(z) = 1 / (1 + e^(−z))
@@ -43,13 +43,13 @@ J(θ) = −(1/m) ∑ [yᵢ log(ŷᵢ) + (1 − yᵢ) log(1 − ŷᵢ)]
 
 ---
 
-## ⚠️ 5. The Overfitting Problem
+##  5. The Overfitting Problem
 Without any constraint on θ, the model can assign **very large weights** to fit training data perfectly — even on noise.  
 This causes **overfitting**, leading to **high variance** and poor generalization.
 
 ---
 
-## 🛡️ 6. Adding L2 Regularization
+##  6. Adding L2 Regularization
 To prevent large weights, we add an L2 penalty:
 
 J(θ) = CrossEntropyLoss + (λ / 2m) ∑ θⱼ²
@@ -60,7 +60,7 @@ Where:
 
 ---
 
-## 🔁 7. Gradient Derivation with Regularization
+##  7. Gradient Derivation with Regularization
 
 Let:
 
@@ -78,7 +78,7 @@ Then:
 
 ---
 
-## 🔃 8. Parameter Update Rules (Gradient Descent)
+##  8. Parameter Update Rules (Gradient Descent)
 
 θ := θ − α [(1/m) Xᵀ(error) + (λ/m) θ]  
 b := b − α (1/m) ∑ (ŷᵢ − yᵢ)
@@ -88,13 +88,13 @@ Where:
 
 ---
 
-## 📊 9. Final Objective Function
+##  9. Final Objective Function
 
 J(θ) = −(1/m) ∑ [yᵢ log(ŷᵢ) + (1 − yᵢ) log(1 − ŷᵢ)] + (λ / 2m) ∑ θⱼ²
 
 ---
 
-## ✅ 10. Summary
+#  10. Summary
 - Logistic regression predicts P(y = 1 | x) using the sigmoid of a linear combination.
 - Cross-entropy loss penalizes incorrect probabilities.
 - L2 regularization keeps weights small to reduce overfitting.

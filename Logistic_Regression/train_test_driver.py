@@ -85,4 +85,4 @@ print("Log Loss :", log_loss(y_test, probs))
 np.save("theta.npy", best_model.theta)
 np.save("bias.npy", best_model.bias)
 
-joblib.dump(scaler, "scaler.pkl")
+joblib.dump(scaler, "scaler.pkl")t

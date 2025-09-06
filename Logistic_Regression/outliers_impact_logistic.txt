@@ -1,0 +1,40 @@
+Impact of Outliers on Logistic Regression
+=========================================
+
+1. Why Sensitive to Outliers
+----------------------------
+- Logistic regression estimates parameters using Maximum Likelihood Estimation (MLE).
+- Outliers with extreme feature values (X) produce large log-odds (wᵗx + b), forcing coefficients (w) to inflate.
+- This skews the decision boundary and probabilities, leading to overfitting and poor generalization.
+
+---
+
+2. Effects of Outliers
+----------------------
+- **Coefficients**: Become disproportionately large.
+- **Decision Boundary**: Shifts toward the outlier, misclassifying normal points.
+- **Probabilities**: Extreme logit values push predicted probabilities to 0 or 1.
+- **Metrics**: Increased variance, lower precision/recall.
+
+---
+
+3. Detection
+------------
+- **Statistical**: Z-score > 3 or IQR-based detection.
+- **Influence Metrics**: Cook’s distance, leverage (hat values).
+- **Visualization**: Boxplots, scatter plots.
+
+---
+
+4. Handling Outliers
+--------------------
+- **Preprocessing**: Remove, cap (winsorize), or transform features (e.g., log).
+- **Regularization**: L2 (Ridge) stabilizes large weights; L1 (Lasso) can zero out noisy features.
+- **Robust Logistic Regression**: Use Huberized or quantile-based loss functions.
+- **Scaling**: Standardization reduces the dominance of extreme values.
+
+---
+
+Key Insight:
+------------
+Outliers distort parameter estimation in logistic regression due to the linear log-odds structure. Regularization and robust preprocessing are essential to mitigate their impact.
