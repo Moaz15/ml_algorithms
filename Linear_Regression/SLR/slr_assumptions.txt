@@ -1,0 +1,303 @@
+Assumptions of Linear Regression 
+
+2.Independence of Errors (No Autocorrelation)
+Residuals (errors) from predictions should be independent — meaning, the error from one observation should not influence another.
+This mainly matters if  data is time-dependent (like time-series or sequential samples).
+The error for one data point should not give you any clue about the error for the next one
+If they are related — like if one big error is often followed by another big error — it means there’s a pattern left in the data that the model didn’t capture.
+Residuals should be random and not connected. If they’re not, your model is missing something (like a time trend or seasonal effect).
+
+The Durbin–Watson statistic checks for autocorrelation in residuals — basically whether the residuals are related to each other across observations.
+
+The Durbin–Watson statistic is calculated as:
+           DW≈2(1−ρ)
+
+where are the residuals from the regression.The numerator measures how much each residual differs from the previous one (a measure of change).
+The denominator is the total variance in residuals.
+
+| ρ (autocorrelation) | DW ≈ 2(1 − ρ) | Interpretation                                             |
+| ------------------- | ------------- | ---------------------------------------------------------- |
+| ρ = 0               | DW ≈ 2        | No autocorrelation                                         |
+| ρ > 0               | DW < 2        | Positive autocorrelation (residuals tend to move together) |
+| ρ < 0               | DW > 2        | Negative autocorrelation (residuals alternate in sign)     |
+
+Possible fixes:
+
+Add lag features (previous time steps).
+
+Use ARIMA / SARIMA models for time data.
+
+Ensure data order isn’t chronological when it shouldn’t be.
+
+3. Homoscedasticity (Constant Variance of Errors)
+🔹 Meaning:
+Homoscedasticity means that the variance of residuals (errors) is constant across all levels of the predicted values or independent variables.
+In simple terms, the spread of errors should be even — not increasing or decreasing with the predicted value.
+
+The mistakes your regression model makes should be evenly spread across all values — not bigger or smaller for some parts of the data.
+🔹 Example:
+Imagine you’re predicting income based on years of experience:
+People with low experience → model predicts well (small errors).
+People with high experience → income varies a lot (large errors).
+
+Here, the variance of residuals changes with experience → this is called Heteroscedasticity.
+That means the variance is not constant, violating an important regression assumption.
+
+🔹 Why Heteroscedasticity is a Problem:
+Confidence intervals and p-values become unreliable.
+The model’s accuracy is uneven — it fits some parts of the data better than others.
+Standard errors become biased, leading to wrong conclusions about variable significance.
+
+🔹 Key Points:
+Homoscedasticity = even spread of errors (constant variance).
+Heteroscedasticity = uneven or funnel-shaped spread of errors (changing variance).
+Residuals should look like random noise, evenly spread around zero for all predicted values.
+
+Remedies: 
+| **Remedy**             | **Approach**                      | **When to Use**                              |
+| ---------------------- | --------------------------------- | -------------------------------------------- |
+| Log / sqrt transform   | Stabilize variance                | When residual spread increases with Y        |
+| Weighted Least Squares | Reweight high-error points        | When variance is proportional to predictions |
+| Robust Regression      | Downweight outliers automatically | When data has noise/outliers                 |
+| Add missing features   | Improve model specification       | When key variable is missing                 |
+| Re-specify model       | Handle structure in data          | When groups/time cause variance shifts       |
+
+
+4. Normality of Residuals
+
+This assumption states that the residuals (errors) from linear regression model should be normally distributed — i.e., they follow a bell-shaped curve centered around zero.
+Most prediction errors should be small (near 0), and large errors should be rare.
+
+Ensures the validity of hypothesis tests (t-test, F-test).
+Gives reliable confidence intervals and p-values for coefficients.
+Helps the model make statistically sound predictions.
+
+Even if the residuals aren’t perfectly normal, linear regression predictions remain unbiased — but inference quality (like hypothesis tests) becomes questionable.
+
+Remedies for Non-Normal Residuals
+
+1.Transform the Target Variable (Most Effective)
+2.Remove or Cap Outliers
+3.Add Missing Predictors
+If residuals remain non-normal, it might mean your model is missing key explanatory features.
+
+
+5 Multicollinearity (No High Correlation Between Predictors)
+
+Multicollinearity occurs when two or more independent variables are highly correlated with each other.
+This means they carry redundant information, which confuses the model while estimating coefficients.
+If two predictors give almost the same information, the model gets confused about which one is actually causing the effect.
+The model can still predict well, but its coefficients (β values) become unstable and unreliable.
+
+When features are highly correlated:
+
+The model struggles to determine the true effect of each feature.
+Coefficients become very sensitive to small data changes.
+p-values and standard errors become meaningless.
+You might even see wrong signs (positive/negative) for coefficients.
+
+It’s a problem when:
+
+You want to interpret coefficients (like in regression analysis).
+You can’t tell which variable really affects the outcome.
+Signs (positive/negative) or sizes of coefficients become unreliable.
+You have very high correlation (close to 1 or -1) between predictors.
+The model becomes unstable — small data changes cause large swings in coefficient values.
+p-values and standard errors become misleading.
+It might look like no variable is significant, even though together they are.
+
+MULTICOLLINEARITY (Mathematical Explanation)
+--------------------------------------------
+
+1. Linear Regression Model:
+   y = β0 + β1X1 + β2X2 + ... + βkXk + ε
+
+   - y  = dependent variable
+   - X1, X2, ..., Xk = independent variables (predictors)
+   - β0, β1, ..., βk = coefficients
+   - ε  = error term
+
+2. Matrix Form:
+   y = Xβ + ε
+
+   - X is an n×k matrix of predictors
+   - β is a k×1 vector of coefficients
+
+   The least squares estimate is:
+   β̂ = (XᵀX)⁻¹ Xᵀy
+
+3. Where Multicollinearity Appears:
+   - If two or more columns in X are highly correlated,
+     one column can be written as a linear combination of others:
+       Xj = a1X1 + a2X2 + ... + aj-1Xj-1
+
+   - In this case, XᵀX becomes nearly singular
+     (its inverse (XᵀX)⁻¹ becomes unstable or impossible to compute).
+
+4. Why It’s a Problem:
+   - The variance of β̂ is:
+       Var(β̂) = σ² (XᵀX)⁻¹
+
+     If (XᵀX)⁻¹ is large or unstable:
+       → Coefficients (β̂) change a lot with small data changes
+       → Standard errors become large
+       → p-values become unreliable
+
+5. Measuring Multicollinearity (VIF - Variance Inflation Factor):
+   For each variable Xj:
+       VIFj = 1 / (1 - Rj²)
+
+   - Rj² is the R-squared from regressing Xj on all other predictors
+   - If Rj² is high → VIFj is large → multicollinearity exists
+
+Interpretation:
+- VIF = 1      → No correlation
+- VIF = 1–5    → Low to moderate correlation (acceptable)
+- VIF > 5      → Problematic multicollinearity
+- VIF > 10     → Severe multicollinearity (serious concern)
+
+
+6. In Simple Words:
+   When predictors are highly correlated,
+   XᵀX is hard to invert,
+   which makes the estimated coefficients (β̂) unstable and unreliable.
+
+| Type                     | Description                              | Invertible (XᵀX)? | Regression Works? |
+|--------------------------|------------------------------------------|-------------------|-------------------|
+| Perfect Multicollinearity | Exact linear relationship                | ❌ No             | ❌ No             |
+| Non-Perfect Multicollinearity | Very high (but not exact) correlation | ✅ Yes            | ⚠️ Yes, but unreliable |
+
+- Perfect multicollinearity → model fails.
+- Non-perfect multicollinearity → model works, but results are unstable.
+
+------------------------------------------------------------
+| Type                     | Cause                         | Correlation | Regression Works? | Problem Severity |
+|---------------------------|--------------------------------|--------------|-------------------|------------------|
+| Structural (Perfect)      | Model design / dummy trap      | |r| = 1      | ❌ No             | 🔴 Severe        |
+| Data-Based (Imperfect)    | High correlation in data       | |r| < 1      | ⚠️ Yes, but unstable | 🟠 Moderate/Severe |
+
+
+- Structural multicollinearity → caused by model setup (exact relationship)
+- Data-based multicollinearity → caused by data patterns (strong but not exact relationship)
+
+Detection : 
+
+| Method                     | What It Checks                          | Threshold / Warning Sign     |
+|-----------------------------|------------------------------------------|------------------------------|
+| Correlation Matrix          | Pairwise correlations                    | |r| > 0.8                    |
+| Variance Inflation Factor   | R² among predictors                      | VIF > 5 or 10                |
+| Tolerance                   | Inverse of VIF                           | < 0.1 or < 0.2               |
+
+- Start with a correlation matrix for a quick check.
+- Use VIF and Tolerance for precise measurement.
+- High VIF or low Tolerance = multicollinearity problem.
+
+HOW TO REMOVE MULTICOLLINEARITY
+-------------------------------
+
+Multicollinearity occurs when two or more independent variables are highly correlated.
+It makes the regression coefficients unstable and difficult to interpret.
+
+Here are the main methods to reduce or remove it:
+
+------------------------------------------------------------
+1. REMOVE HIGHLY CORRELATED VARIABLES
+------------------------------------------------------------
+- Check the correlation matrix or VIF values.
+- If two variables are highly correlated (|r| > 0.8 or VIF > 10),
+  remove one of them from the model.
+
+Example:
+  If “Height in inches” and “Height in centimeters” are both included,
+  keep only one since they represent the same information.
+
+------------------------------------------------------------
+2. COMBINE VARIABLES
+------------------------------------------------------------
+- If two variables measure similar concepts, combine them into one.
+
+Example:
+  If you have:
+    X1 = "number of purchases"
+    X2 = "amount spent"
+  You can create:
+    X_combined = X1 * X2  (or their average)
+  This reduces redundancy and keeps useful information.
+
+------------------------------------------------------------
+3. USE PRINCIPAL COMPONENT ANALYSIS (PCA)
+------------------------------------------------------------
+- PCA transforms correlated variables into a smaller set of
+  uncorrelated components (called principal components).
+- These components capture most of the information but remove correlation.
+
+Effect:
+- Eliminates multicollinearity completely.
+- But the new components lose some interpretability (not original variables).
+
+------------------------------------------------------------
+4. CENTER OR STANDARDIZE VARIABLES
+------------------------------------------------------------
+- When multicollinearity arises due to interaction terms or polynomial terms,
+  centering can help.
+
+Example:
+  Instead of using X and X² directly,
+  create centered versions:
+    X_centered = X - mean(X)
+    X_centered² = (X - mean(X))²
+
+- This reduces correlation between X and X².
+
+------------------------------------------------------------
+5. USE REGULARIZATION METHODS
+------------------------------------------------------------
+- Apply regression techniques that can handle multicollinearity:
+  - **Ridge Regression (L2 Regularization)**:
+    Shrinks coefficients of correlated variables toward zero.
+  - **Lasso Regression (L1 Regularization)**:
+    Can completely eliminate some coefficients (variable selection).
+
+Effect:
+- Stabilizes the coefficients.
+- Improves prediction accuracy even with correlated predictors.
+
+------------------------------------------------------------
+6. INCREASE SAMPLE SIZE
+------------------------------------------------------------
+- Sometimes multicollinearity occurs due to small datasets.
+- Collecting more data can help make variable relationships clearer
+  and reduce instability.
+
+------------------------------------------------------------
+7. DROP ONE DUMMY VARIABLE (Dummy Variable Trap)
+------------------------------------------------------------
+- In categorical variables represented by dummy variables,
+  always drop one category to avoid perfect multicollinearity.
+
+Example:
+  For a variable "Gender" with categories Male and Female:
+    Use only one dummy:
+      Male = 1 if male, 0 otherwise
+    (Do NOT include Female dummy + intercept together)
+
+------------------------------------------------------------
+8. SUMMARY TABLE
+------------------------------------------------------------
+| Method                        | When to Use                            | Effect on Model              |
+|-------------------------------|----------------------------------------|------------------------------|
+| Remove correlated variables   | Variables are redundant                | Simplifies model             |
+| Combine variables             | Variables measure same concept         | Keeps info, reduces overlap  |
+| PCA                           | Many correlated variables              | Removes correlation, less interpretable |
+| Center/Standardize            | Polynomial or interaction terms        | Reduces correlation          |
+| Ridge/Lasso Regression        | Prediction-focused models              | Stabilizes coefficients      |
+| Increase sample size          | Small dataset                          | Reduces random correlations  |
+| Drop dummy variable           | Dummy variable trap                    | Fixes perfect multicollinearity |
+
+------------------------------------------------------------
+IN SHORT:
+- First, detect which variables are correlated (using VIF or correlation matrix).
+- Then, try removing, combining, transforming, or regularizing them.
+- Goal: Keep important information but make predictors independent enough.
+
+

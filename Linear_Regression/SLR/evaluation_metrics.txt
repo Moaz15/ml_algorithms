@@ -1,0 +1,51 @@
+1. Mean Absolute Error (MAE)   = 1/n *(∑​∣yi​−y^​i​∣)
+
+It measures the average absolute difference between actual and predicted values.
+It tells you “on average, how far off” your predictions are.
+
+Easy to interpret — same units as target variable.
+Robust to outliers (compared to MSE).
+
+Use MAE when we care equally about all errors and want a simple average difference.
+
+2. Mean Squared Error (MSE)
+
+               MSE= 1/n*(∑​(yi​−y^​i​)2)
+
+Measures the average of squared differences between actual and predicted values.
+Penalizes large errors more (since errors are squared).
+Useful when large mistakes are especially bad.
+Use MSE when you want to heavily penalize large deviations (e.g., financial forecasting, risk prediction).
+
+Units are squared — not directly interpretable.
+
+3.Root Mean Squared Error (RMSE)
+
+               RMSE=MSE**0.5
+​
+It’s just the square root of MSE — brings units back to original scale.
+Shows how far predictions deviate on average
+Sensitive to large errors, but interpretable.
+
+Use RMSE when you want a balanced metric — interpretable like MAE but still penalizing large errors more.
+
+4. R² Score (Coefficient of Determination)
+
+              R2= 1− RSS/TSS​
+
+It tells  how much of the variance in y is explained by  model.
+R² = 1 → perfect fit
+R² = 0 → model explains nothing beyond mean
+R² < 0 → worse than a horizontal line (mean prediction)
+
+5 . Adjusted R**2 = 1−(1−R**2)n−1/n−p-1​
+
+n = number of data points
+p = number of independent variables (features)
+
+It adjusts R² for the number of predictors — penalizes adding useless variables.
+Helps avoid overfitting.
+Increases only if a new variable actually improves the model.
+
+
+Use Adjusted R² when comparing models with different numbers of features.

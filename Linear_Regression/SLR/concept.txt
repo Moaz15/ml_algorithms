@@ -1,0 +1,101 @@
+1. What is Linear Regression?
+------------------------------
+Linear Regression is a supervised learning algorithm used to model the 
+relationship between a continuous dependent variable (target) and one or 
+more independent variables (features).
+
+Goal: Learn weights (w) such that predicted values (ŷ) are as close as 
+possible to the true values (y), minimizing the error.
+
+2. Types of Linear Regression
+-----------------------------
+(a) Simple Linear Regression:
+    One feature x
+    Equation:
+        ŷ = w0 + w1 * x
+
+(b) Multiple Linear Regression:
+    Multiple features x1, x2, ..., xn
+    Equation:
+        ŷ = w0 + w1 * x1 + w2 * x2 + ... + wn * xn
+
+3. Hypothesis Function
+----------------------
+We express prediction as a dot product of weights and inputs:
+    ŷ = w^T * x
+
+Expanded form:
+    ŷ = w0 + w1 * x1 + w2 * x2 + ... + wn * xn
+
+Where:
+    x = [1, x1, x2, ..., xn]         --> feature vector with bias
+    w = [w0, w1, w2, ..., wn]        --> weight vector including bias
+
+4. Cost Function (Mean Squared Error)
+-------------------------------------
+We define a cost function to measure prediction error.
+
+Mean Squared Error (MSE):
+    J(w) = (1 / 2m) * Σ (ŷᵢ - yᵢ)^2
+
+Where:
+    m      = number of training samples
+    yᵢ     = true value
+    ŷᵢ     = predicted value
+
+Note: We include 1/2 for easier gradient derivation.
+
+5. Gradient Descent
+-------------------
+Used to minimize the cost function J(w) by iteratively updating weights.
+
+Update Rule:
+    w_j := w_j - α * (∂J / ∂w_j)
+
+Where:
+    α      = learning rate
+    ∂J/∂w_j = gradient of the cost with respect to weight w_j
+
+Gradient of J(w):
+    ∂J/∂w_j = (1 / m) * Σ (ŷᵢ - yᵢ) * x_jᵢ
+
+6. Bias Handling
+----------------
+We add a column of 1s to the feature matrix X to handle the intercept term.
+
+X (original) shape: (m, n)
+X (with bias) shape: (m, n + 1)
+
+This allows the hypothesis to be expressed as:
+    ŷ = w^T * x
+Including:
+    w0 (bias), w1, ..., wn
+    1 ,  x1 , ..., xn
+
+7. Stopping Criteria
+--------------------
+Gradient Descent stops when:
+    - A fixed number of iterations (epochs) is reached
+    - OR change in cost J(w) between steps is below a threshold (convergence)
+
+8. Prediction
+-------------
+Once weights w are learned:
+    ŷ = w^T * x
+
+Used to make predictions on new unseen data.
+
+9. Evaluation Metric: R² Score (Coefficient of Determination)
+--------------------------------------------------------------
+Measures how well predictions approximate actual values.
+
+R² = 1 - (Σ (yᵢ - ŷᵢ)^2) / (Σ (yᵢ - ȳ)^2)
+
+Where:
+    ȳ = mean of true values yᵢ
+
+Interpretation:
+    R² = 1   --> perfect prediction
+    R² = 0   --> predicts mean only
+    R² < 0   --> worse than mean prediction
+

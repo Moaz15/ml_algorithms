@@ -1,0 +1,70 @@
+1️⃣ MATHEMATICAL FORMULATION
+
+MLR models the relationship between one dependent variable (y) 
+and multiple independent variables (X₁, X₂, ..., Xₙ).
+
+Equation:
+    ŷ = β₀ + β₁X₁ + β₂X₂ + ... + βₙXₙ
+
+Matrix Form:
+    ŷ = Xβ
+
+Where:
+    X  = matrix of input features (n × d)
+    β  = vector of coefficients (d × 1)
+    y  = target vector (n × 1)
+    β₀ = intercept term
+
+Goal:
+    Estimate β so that the model fits the data as closely as possible.
+
+2️⃣ ERROR FUNCTION (COST FUNCTION)
+
+We measure model performance using the **Sum of Squared Errors (SSE)**.
+
+Error Function (Loss):
+    J(β) = (1 / 2n) * Σ (yᵢ - ŷᵢ)²
+         = (1 / 2n) * ||y - Xβ||²
+
+Here:
+    yᵢ - ŷᵢ  → residual (difference between actual and predicted)
+    ||...||²  → squared Euclidean norm (sum of squares)
+
+The goal is to minimize J(β).
+
+
+3️⃣ MINIMIZING ERROR (OPTIMIZATION)
+We find the optimal β that minimizes J(β).
+Two main approaches:
+
+**(a) Analytical Solution (Normal Equation)**
+    β̂ = (XᵀX)⁻¹ Xᵀy
+
+This gives the exact coefficients directly (used in OLS).
+
+**(b) Iterative Solution (Gradient Descent)**
+    β ← β - α * ∇J(β)
+    ∇J(β) = (1/n) * Xᵀ(Xβ - y)
+
+Where:
+    α = learning rate (controls step size)
+    ∇J(β) = gradient of cost function
+
+We repeat updates until convergence (error stops decreasing).
+
+
+- The cost function is **convex**, meaning it has a single global minimum.
+- The gradient tells us the direction of steepest increase, 
+  so subtracting it moves us toward the minimum.
+
+Interpretation:
+    • Small J(β) → model fits data well.
+    • Large J(β) → poor fit (large residuals).
+
+Once minimized, we get β̂ — our best-fitting coefficients.
+
+
+- MLR tries to find a hyperplane that minimizes total squared error.
+- It can be solved exactly (Normal Equation) or iteratively (Gradient Descent).
+- Evaluation metrics: MSE, RMSE, MAE, and R² Score.
+"""
