@@ -1,0 +1,300 @@
+1. What is Prediction Error?
+
+When a model predicts something, the error can come from three places:
+
+Irreducible Error
+Noise in the data (randomness).
+Cannot be removed — even a perfect model cannot fix it.
+
+Bias Error
+Error because the model is too simple or makes wrong assumptions.
+
+Variance Error
+Error because the model is too sensitive to training data.
+
+Total Error = Bias² + Variance + Irreducible Error
+This is called Bias-Variance Decomposition.
+
+Why Bias² Appears in the Formula
+
+Think of Bias as:
+The average difference between the model’s predictions and the true value.
+
+Bias = E[prediction] – true_value
+But in the final error decomposition, we need the squared error, because:
+Machine learning loss functions use squared error
+For regression:
+Loss = (prediction – true_value)²
+So when we break this loss into components, the Bias term naturally becomes Bias².
+
+| Term      | Meaning                                                             |
+| --------- | ------------------------------------------------------------------- |
+| **Bias**  | The amount by which the model’s predictions are wrong *on average*. |
+| **Bias²** | The contribution of biased predictions to total squared error.      |
+
+Why is it not written as “Variance²”?
+Because Variance itself is already a squared quantity in statistics.
+
+Variance = E[(prediction – mean_prediction)²]
+
+The difference between the average prediction and true value gives Bias²
+The spread of predictions around the average gives Variance
+
+2.1 What is Bias?
+
+Bias is the error caused by incorrect assumptions made by the model.
+Model is too simple → cannot capture patterns → gives wrong predictions consistently.
+
+Imagine trying to fit a straight line to a curved pattern.
+The line cannot bend → so it will always be off → systematic error.
+That systematic error is bias.
+
+Characteristics of High Bias Models
+
+Model is too simple
+Underfits the data
+Gives similar predictions even when the input changes
+Training error is high
+Test error is also high
+Model doesn't learn enough patterns
+
+Examples
+| Model                                    | Why High Bias?                            |
+| ---------------------------------------- | ----------------------------------------- |
+| **Linear Regression** on non-linear data | Model is too simple                       |
+| **Shallow Decision Tree**                | Not enough splits to learn patterns       |
+| **Under-trained Neural Network**         | Not enough parameters                     |
+| **Strong regularization (L2 very high)** | Forces weights to be small → underfitting |
+
+Effects of High Bias
+
+Predictions are consistently wrong
+Model is “rigid”
+Doesn’t adapt well to data
+Poor performance on both training and testing sets
+
+High bias symptoms:
+
+💢 Training error: High
+💢 Validation error: High
+
+Gap between them: Small
+Why?
+The model is bad at learning → even training data errors are high.
+
+| Technique                                       | Why it helps                                |
+| ----------------------------------------------- | ------------------------------------------- |
+| **Increase model complexity**                   | Model can learn more patterns               |
+| **Add more features**                           | More information to learn from              |
+| **Add polynomial features**                     | Captures curves                             |
+| **Reduce regularization (L1/L2)**               | Allows larger weights → more flexible model |
+| **Use deeper decision trees / neural networks** | More capacity                               |
+
+
+3.1 What is Variance?
+
+Variance is the error caused by too much sensitivity to the training data.
+The model learns the noise → changes its prediction too much depending on the dataset.
+
+Imagine you train the same model on 5 slightly different datasets.
+
+A high-variance model will:
+Give 5 very different answers
+
+A low-variance model will:
+Give almost the same answer every time
+
+Characteristics of High Variance Models
+
+Model is too complex
+Overfits training data
+Captures noise instead of patterns
+Very low training error
+Very high test error
+Predictions fluctuate a lot
+
+
+Examples of High Variance Models
+| Model                                             | Why High Variance?   |
+| ------------------------------------------------- | -------------------- |
+| **Deep decision trees**                           | They memorize data   |
+| **kNN with k = 1**                                | Perfect memorization |
+| **Very deep neural networks (under regularized)** | Too many parameters  |
+| **Polynomial regression with high degree**        | Overfits curve       |
+| **Boosted models with too many rounds**           | Fits noise           |
+
+Effects of High Variance
+
+Training accuracy = HIGH
+Validation accuracy = LOW
+Unstable predictions
+Overfitting the training data
+Poor generalization
+
+High variance symptoms:
+
+Training error: LOW
+Validation error: HIGH
+Gap between them: LARGE
+
+This means the model memorized the training data.
+
+
+How to Reduce Variance
+
+1. Get More Data
+The BEST fix for variance.
+
+✔ 2. Use Regularization
+L1 (Lasso)
+L2 (Ridge)
+ElasticNet
+Reduces weights → reduces model flexibility.
+
+3. Reduce Model Complexity
+
+Prune decision trees
+Reduce neural network layers
+Lower polynomial degree
+
+4. Use Ensemble Techniques
+| Method                      | How it reduces variance                             |
+| --------------------------- | --------------------------------------------------- |
+| **Bagging**                 | Averages noisy models                               |
+| **Random Forest**           | Random sampling reduces dependency on training data |
+| **Dropout (Deep Learning)** | Prevents neurons from co-adapting                   |
+
+
+5. Feature Selection / Feature Reduction
+
+Removes noisy features
+Use PCA, autoencoders
+
+
+Bias–Variance Tradeoff
+
+4.1 What is the Tradeoff?
+Bias and Variance behave opposite to each other.
+
+Increase model complexity →
+Bias ↓
+Variance ↑
+
+✔ Decrease model complexity →
+Bias ↑
+Variance ↓
+
+You cannot reduce both at the same time.
+Finding the sweet spot is the tradeoff.
+
+Bias decreases as complexity increases
+Variance increases as complexity increases
+Total error is minimum where the two curves meet
+
+Underfitting vs Overfitting
+| Situation        | Cause         | Error Pattern                     |
+| ---------------- | ------------- | --------------------------------- |
+| **Underfitting** | High bias     | High train error, high test error |
+| **Overfitting**  | High variance | Low train error, high test error  |
+
+4.3 Why does the tradeoff exist?
+
+Because:
+Simple models cannot learn enough → high bias
+Complex models learn too much including noise → high variance
+Both extremes are bad.
+
+4.4 How to Balance the Tradeoff
+
+Model complexity (trees depth, polynomial degree, NN layers)
+
+Regularization (L1/L2)
+More regularization → high bias, low variance
+Less regularization → low bias, high variance
+
+Number of samples
+More data → reduces variance
+Doesn’t reduce bias
+
+Ensemble methods
+Bagging → reduces variance
+Boosting → reduces bias
+
+Hyperparameter tuning
+Use cross-validation to find the best:
+Depth
+Number of layers
+Learning rate
+λ (regularization strength)
+
+
+Mathematical View — Bias–Variance Decomposition
+
+E[(ŷ – y)²] = Bias² + Variance + Irreducible Error
+
+ŷ = model prediction
+y = true value
+
+y = f(x) + ε
+ŷ = f̂(x)
+
+prediction error:
+E[(f̂(x) – y)²]
+E[(f̂(x) – (f(x) + ε))²]
+E[(f̂(x) – f(x) – ε)²]
+(a – b – c)² = (a – b)² + c² – 2(a – b)c
+E[(f̂(x) – f(x))²]  + E[ε²]  – 2E[(f̂(x) – f(x)) ε]
+
+But since ε is noise independent of the model and has mean 0:
+E[(f̂(x) – f(x)) ε] = 0
+
+E[(f̂(x) – f(x))²] + E[ε²]
+E[ε²] = σ²   (irreducible noise)
+
+Total Error = E[(f̂(x) – f(x))²] + σ²
+E[(f̂(x) – E[f̂(x)] + E[f̂(x)] – f(x))²]
+
+How Model Complexity Affects Bias & Variance
+
+Model complexity = ability of the model to learn flexible patterns.
+Examples of increasing complexity:
+
+Linear regression → polynomial regression
+Shallow tree → deep tree
+Small NN → big NN
+Few parameters → many parameters
+
+Examples of Models and Their Bias–Variance Behavior
+
+Linear Regression
+Low complexity → High bias, Low variance
+Won’t fit curves
+
+Polynomial Regression
+High degree → Low bias, High variance
+Can overfit noise
+
+Decision Trees
+Shallow tree → High bias, Low variance
+Deep tree → Low bias, High variance (memorizes data)
+
+Random Forest
+Reduces variance using averaging
+Bias stays low
+Powerful and stable
+
+Boosting (XGBoost, LightGBM)
+Reduces bias by sequential corrections
+Can increase variance if not regularized
+
+Neural Networks
+Small network → High bias
+Large network → Low bias, High variance
+Regularization helps balance
+
+
+
+
+
+
+

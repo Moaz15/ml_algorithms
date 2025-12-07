@@ -1,67 +1,109 @@
-Goal:
+SIMPLE LINEAR REGRESSION — MATHEMATICAL APPROACH
+================================================
+
+Goal
+----------------------------------------------------------------------------------------------------------------------------------------------------
 Given n data points (x₁, y₁), (x₂, y₂), …, (xₙ, yₙ),
 we want to fit a line:
 
-ŷ = m*x + c
+    ŷ = m*x + c
 
 that minimizes the Mean Squared Error (MSE):
 
-J(m, c) = (1/n) * Σ (yᵢ - (m*xᵢ + c))²
+    J(m, c) = (1/n) * Σ (yᵢ - (m*xᵢ + c))²
+
 
 Residuals and SSE
-
+-----------------------------------------------------------------------------------------------------------------------------------------------
 Define residuals:
 
-eᵢ = yᵢ - (m*xᵢ + c)
+    eᵢ = yᵢ - (m*xᵢ + c)
 
-Then the sum of squared errors (SSE) is:
+Sum of Squared Errors (SSE):
 
-SSE(m, c) = Σ (yᵢ - m*xᵢ - c)²
+    SSE(m, c) = Σ (yᵢ - m*xᵢ - c)²
+
 
 Normal Equations
-
+----------------------------------------------------------------------------------------------------------------------------------------------
 To minimize SSE, take partial derivatives and set them to zero:
 
-∂SSE/∂m = -2 Σ xᵢ (yᵢ - mxᵢ - c) = 0
-∂SSE/∂c = -2 Σ (yᵢ - mxᵢ - c) = 0
+    ∂SSE/∂m = -2 Σ xᵢ (yᵢ - m*xᵢ - c) = 0
+    ∂SSE/∂c = -2 Σ (yᵢ - m*xᵢ - c) = 0
 
-Solving these gives:
+Solving these equations gives the closed-form solution:
 
-m = Σ(xᵢ - x̄)(yᵢ - ȳ) / Σ(xᵢ - x̄)²
-c = ȳ - m*x̄
+    m = Σ(xᵢ - x̄)(yᵢ - ȳ) / Σ(xᵢ - x̄)²
+    c = ȳ - m*x̄
 
 Or equivalently:
 
-m = S_xy / S_xx
-c = ȳ - m*x̄
+    m = S_xy / S_xx
+    c = ȳ - m*x̄
+
 
 Gradient Descent Approach
-
+-------------------------------------------------------------------------------------------------------------------------------------------------
 We can also minimize J(m, c) iteratively using gradient descent.
 
 Partial derivatives:
 
-∂J/∂m = (-2/n) Σ xᵢ (yᵢ - mxᵢ - c)
-∂J/∂c = (-2/n) Σ (yᵢ - mxᵢ - c)
+    ∂J/∂m = (-2/n) Σ xᵢ (yᵢ - m*xᵢ - c)
+    ∂J/∂c = (-2/n) Σ (yᵢ - m*xᵢ - c)
 
-Update rules (learning rate = α):
+Update rules (learning rate α):
 
-m = m - α * (∂J/∂m)
-c = c - α * (∂J/∂c)
+    m := m - α * (∂J/∂m)
+    c := c - α * (∂J/∂c)
+
 
 Coefficient of Determination (R²)
-
+------------------------------------------------------------------------------------------------------------------------------------------------
 To measure goodness of fit:
 
-TSS = Σ (yᵢ - ȳ)² → Total Sum of Squares
-RSS = Σ (yᵢ - ŷᵢ)² → Residual Sum of Squares
-R² = 1 - (RSS / TSS)
+    TSS = Σ (yᵢ - ȳ)²        → Total Sum of Squares
+    RSS = Σ (yᵢ - ŷᵢ)²       → Residual Sum of Squares
+
+R² score:
+
+    R² = 1 - (RSS / TSS)
+
+Interpretation:
+    R² = 1   → perfect fit
+    R² = 0   → predicts the mean
+    R² < 0   → worse than predicting the mean
+
 
 Summary
+-----------------------------------------------------------------------------------------------------------------------------------------------
+Closed-form solution (Normal Equation):
 
-Closed-form solution:
-m = Σ(xᵢ - x̄)(yᵢ - ȳ) / Σ(xᵢ - x̄)²
-c = ȳ - m*x̄
+    m = Σ(xᵢ - x̄)(yᵢ - ȳ) / Σ(xᵢ - x̄)²
+    c = ȳ - m*x̄
 
-Gradient Descent: iterative method to minimize J(m, c).
-R² measures how well the line explains the variance in y.
+Gradient Descent:
+    Iterative method to minimize J(m, c).
+
+R²:
+    Measures how well the line explains variance in y.
+
+
+Why Use Gradient Descent When Normal Equation Exists?
+-----------------------------------------------------------------------------------------------------------------------------------------------------------
+Normal Equation only works efficiently for simple or small linear regression problems.
+
+Gradient descent is preferred when:
+    - Number of features is very large
+    - Matrix inversion (XᵀX) becomes expensive
+    - Data does not fit into memory
+    - Regularization is used (especially L1 / Lasso)
+    - We work with models beyond linear regression
+
+Gradient Descent generalizes to:
+    - Logistic Regression
+    - Neural Networks
+    - Support Vector Machines (via SGD)
+    - Deep Learning
+    - Generalized Linear Models
+
+It is the universal optimization method used across modern ML.

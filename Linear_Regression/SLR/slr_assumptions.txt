@@ -1,33 +1,32 @@
 Assumptions of Linear Regression 
+1. 
 
-2.Independence of Errors (No Autocorrelation)
-Residuals (errors) from predictions should be independent — meaning, the error from one observation should not influence another.
-This mainly matters if  data is time-dependent (like time-series or sequential samples).
-The error for one data point should not give you any clue about the error for the next one
-If they are related — like if one big error is often followed by another big error — it means there’s a pattern left in the data that the model didn’t capture.
-Residuals should be random and not connected. If they’re not, your model is missing something (like a time trend or seasonal effect).
+2. Independence of Errors (No Autocorrelation)
+--------------------------------------------------------------------------------------------------------------------------------------
+Residuals should be independent — the error from one observation must not be related to the error from another.
 
-The Durbin–Watson statistic checks for autocorrelation in residuals — basically whether the residuals are related to each other across observations.
+Why it matters:
+    - Mainly important for time-dependent data (time series, sequences).
+    - If one large error is followed by another, the model is missing a pattern
+      (trend, seasonality, lag effect).
+    - Residuals should look random. If not, the model is underfitting structure in the data.
 
-The Durbin–Watson statistic is calculated as:
-           DW≈2(1−ρ)
+Durbin–Watson Test:
+    - Checks for autocorrelation in residuals.
+    - Formula (approx):
+          DW ≈ 2(1 − ρ)
 
-where are the residuals from the regression.The numerator measures how much each residual differs from the previous one (a measure of change).
-The denominator is the total variance in residuals.
+      where ρ is the correlation between consecutive residuals.
 
-| ρ (autocorrelation) | DW ≈ 2(1 − ρ) | Interpretation                                             |
-| ------------------- | ------------- | ---------------------------------------------------------- |
-| ρ = 0               | DW ≈ 2        | No autocorrelation                                         |
-| ρ > 0               | DW < 2        | Positive autocorrelation (residuals tend to move together) |
-| ρ < 0               | DW > 2        | Negative autocorrelation (residuals alternate in sign)     |
+    Interpretation:
+        DW ≈ 2   → No autocorrelation
+        DW < 2   → Positive autocorrelation (residuals move together)
+        DW > 2   → Negative autocorrelation (residuals alternate)
 
-Possible fixes:
-
-Add lag features (previous time steps).
-
-Use ARIMA / SARIMA models for time data.
-
-Ensure data order isn’t chronological when it shouldn’t be.
+Fixes:
+    - Add lag features (yₜ₋₁, xₜ₋₁).
+    - Use time-series models (ARIMA/SARIMA) if data is chronological.
+    - Shuffle data if order should not matter.
 
 3. Homoscedasticity (Constant Variance of Errors)
 🔹 Meaning:

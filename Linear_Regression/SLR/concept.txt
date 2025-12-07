@@ -1,14 +1,12 @@
 1. What is Linear Regression?
-------------------------------
-Linear Regression is a supervised learning algorithm used to model the 
-relationship between a continuous dependent variable (target) and one or 
-more independent variables (features).
+------------------------------------------------------------------------------------------------------------------------------------------------------
+Linear Regression is a supervised learning algorithm used to model the relationship between a continuous dependent variable (target) and one or more independent variables (features).
 
 Goal: Learn weights (w) such that predicted values (ŷ) are as close as 
 possible to the true values (y), minimizing the error.
 
 2. Types of Linear Regression
------------------------------
+---------------------------------------------------------------------------------------------------------------------------------------------
 (a) Simple Linear Regression:
     One feature x
     Equation:
@@ -20,7 +18,7 @@ possible to the true values (y), minimizing the error.
         ŷ = w0 + w1 * x1 + w2 * x2 + ... + wn * xn
 
 3. Hypothesis Function
-----------------------
+------------------------------------------------------------------------------------------------------------------------------------------
 We express prediction as a dot product of weights and inputs:
     ŷ = w^T * x
 
@@ -32,8 +30,17 @@ Where:
     w = [w0, w1, w2, ..., wn]        --> weight vector including bias
 
 4. Cost Function (Mean Squared Error)
--------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------
 We define a cost function to measure prediction error.
+We pick the line that minimizes the total squared distance.
+We want a cost function that is:
+
+smooth
+differentiable
+convex (one global minimum)
+simple gradient
+
+MSE satisfies all these conditions:
 
 Mean Squared Error (MSE):
     J(w) = (1 / 2m) * Σ (ŷᵢ - yᵢ)^2
@@ -45,8 +52,9 @@ Where:
 
 Note: We include 1/2 for easier gradient derivation.
 
+
 5. Gradient Descent
--------------------
+--------------------------------------------------------------------------------------------------------------------------------------
 Used to minimize the cost function J(w) by iteratively updating weights.
 
 Update Rule:
@@ -60,7 +68,7 @@ Gradient of J(w):
     ∂J/∂w_j = (1 / m) * Σ (ŷᵢ - yᵢ) * x_jᵢ
 
 6. Bias Handling
-----------------
+--------------------------------------------------------------------------------------------------------------------------------
 We add a column of 1s to the feature matrix X to handle the intercept term.
 
 X (original) shape: (m, n)
@@ -73,23 +81,33 @@ Including:
     1 ,  x1 , ..., xn
 
 7. Stopping Criteria
---------------------
+--------------------------------------------------------------------------------------------------------------------------------
 Gradient Descent stops when:
     - A fixed number of iterations (epochs) is reached
     - OR change in cost J(w) between steps is below a threshold (convergence)
 
 8. Prediction
--------------
+---------------------------------------------------------------------------------------------------------------------------------
 Once weights w are learned:
     ŷ = w^T * x
 
 Used to make predictions on new unseen data.
 
 9. Evaluation Metric: R² Score (Coefficient of Determination)
---------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------------
 Measures how well predictions approximate actual values.
 
+
+1. How bad your model is
+SSE=∑(yi​−y^​i​)2
+
+2. How bad the “dumb baseline” is
+TSS=∑(yi​−yˉ​)2
+
+How much better is my model compared to predicting the mean?
 R² = 1 - (Σ (yᵢ - ŷᵢ)^2) / (Σ (yᵢ - ȳ)^2)
+
+R2= 1− (baseline error/model error​)
 
 Where:
     ȳ = mean of true values yᵢ
@@ -97,5 +115,5 @@ Where:
 Interpretation:
     R² = 1   --> perfect prediction
     R² = 0   --> predicts mean only
-    R² < 0   --> worse than mean prediction
+    R² < 0   --> worse than mean prediction --If model error is worse than baseline
 

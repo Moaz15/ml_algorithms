@@ -62,9 +62,9 @@ Meeting these assumptions ensures stable, interpretable, and valid results.
 
 Logistic Regression – Complete Conceptual Flow
 
-========================================
+========================================================================================
 1. Geometric Interpretation and Objective Function
-========================================
+========================================================================================
 
 Goal: Find a decision boundary (a hyperplane) that best separates the two classes.
 
@@ -155,9 +155,9 @@ Summary:
 - Cost = Average error across dataset
 
 
-========================================
+========================================================================================
 6. Statistical Objective: Derivation via Maximum Likelihood Estimation
-========================================
+========================================================================================
 
 Step 1: Bernoulli Model for Individual Predictions
 P(y | x) = ŷ^y * (1 – ŷ)^(1 – y)

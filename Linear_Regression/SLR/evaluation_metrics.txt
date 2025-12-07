@@ -1,51 +1,151 @@
-1. Mean Absolute Error (MAE)   = 1/n *(∑​∣yi​−y^​i​∣)
+REGRESSION EVALUATION METRICS
+==============================
 
-It measures the average absolute difference between actual and predicted values.
-It tells you “on average, how far off” your predictions are.
+1. Mean Absolute Error (MAE)
+----------------------------------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MAE = (1/n) * Σ |yᵢ − ŷᵢ|
 
-Easy to interpret — same units as target variable.
-Robust to outliers (compared to MSE).
+Meaning:
+    - Measures the average absolute difference between actual and predicted values.
+    - Tells you “on average, how far off” the predictions are.
+    - Easy to interpret — same units as the target variable.
+    - More robust to outliers compared to MSE (no squaring of errors).
 
-Use MAE when we care equally about all errors and want a simple average difference.
+When to use:
+    - When all errors should be treated equally.
+    - When you want a simple, intuitive average error.
+    - When your data may contain outliers.
+
+Practical Scenarios:
+    - Delivery time prediction (Zomato, Swiggy)
+      → “On average, we are off by 6 minutes.”
+
+    - Taxi fare prediction (Uber, Ola)
+      → Users care about absolute difference, not squared difference.
+
+    - House price estimation for customers
+      → A ₹50,000 error is meaningful; squaring exaggerates errors.
+
+    - Forecasting demand in retail (Amazon, Flipkart)
+      → Outliers (holiday spikes) shouldn’t dominate.
 
 2. Mean Squared Error (MSE)
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MSE = (1/n) * Σ (yᵢ − ŷᵢ)²
 
-               MSE= 1/n*(∑​(yi​−y^​i​)2)
+Meaning:
+    - Measures the average of squared differences between actual and predicted values.
+    - Penalizes large errors heavily (because errors are squared).
+    - Useful when large deviations are especially harmful.
 
-Measures the average of squared differences between actual and predicted values.
-Penalizes large errors more (since errors are squared).
-Useful when large mistakes are especially bad.
-Use MSE when you want to heavily penalize large deviations (e.g., financial forecasting, risk prediction).
+Characteristics:
+    - Units are squared → not directly interpretable.
+    - More sensitive to outliers than MAE.
 
-Units are squared — not directly interpretable.
+When to use:
+    - When large mistakes must be penalized strongly.
+    - Financial forecasting, risk estimation, anomaly detection.
 
-3.Root Mean Squared Error (RMSE)
 
-               RMSE=MSE**0.5
-​
-It’s just the square root of MSE — brings units back to original scale.
-Shows how far predictions deviate on average
-Sensitive to large errors, but interpretable.
+Practical Scenarios:
+    - Loan default prediction (banks)
+      → Large prediction errors are extremely costly.
 
-Use RMSE when you want a balanced metric — interpretable like MAE but still penalizing large errors more.
+    - Insurance claim cost prediction
+      → Underestimating big losses is dangerous.
+
+    - Sensor calibration in manufacturing
+      → Large deviations can break machines.
+
+    - Algorithmic trading / risk modeling
+      → Large forecasting errors can cause major financial loss.
+
+3. Root Mean Squared Error (RMSE)
+---------------------------------------------------------------------------------------------------------------------
+Formula:
+    RMSE = √MSE
+
+Meaning:
+    - Square root of MSE → brings metric back to the original units.
+    - Represents average magnitude of prediction error.
+    - Sensitive to large errors, but easier to interpret than MSE.
+
+When to use:
+    - When you want interpretability like MAE, but still want to penalize large errors more.
+    - Balanced choice for most regression tasks.
+
+Practical Scenarios:
+    - Energy consumption forecasting (electricity usage)
+      → RMSE tells “typical error” in actual units (kWh).
+
+    - Weather forecasting (temperature, rainfall)
+      → Large errors matter more; but units must remain interpretable.
+
+    - Traffic speed prediction / congestion forecasting
+      → RMSE in km/h helps understand typical deviation.
+
+    - Ad-click or impression forecasting (Google Ads, Meta Ads)
+      → Large deviations break budgeting.
+
 
 4. R² Score (Coefficient of Determination)
+------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    R² = 1 − (RSS / TSS)
 
-              R2= 1− RSS/TSS​
+Meaning:
+    - Measures how much of the variance in y is explained by the model.
+    - R² = 1 → perfect prediction
+    - R² = 0 → model does no better than predicting the mean
+    - R² < 0 → model is worse than mean prediction
 
-It tells  how much of the variance in y is explained by  model.
-R² = 1 → perfect fit
-R² = 0 → model explains nothing beyond mean
-R² < 0 → worse than a horizontal line (mean prediction)
+When to use:
+    - To understand how much variation in y is captured by the model.
+    - For comparing models with the same dependent variable.
 
-5 . Adjusted R**2 = 1−(1−R**2)n−1/n−p-1​
+Practical Scenarios:
+    - Academic/statistical modeling
+      → Measure explanatory power of a regression (econometrics).
 
-n = number of data points
-p = number of independent variables (features)
+    - Marketing ROI models (regression analysis)
+      → Understand how much variation in sales is explained by ad spend.
 
-It adjusts R² for the number of predictors — penalizes adding useless variables.
-Helps avoid overfitting.
-Increases only if a new variable actually improves the model.
+    - Medical studies predicting blood pressure, BMI, etc.
+      → How well do features explain the target?
+
+    - Business dashboards where interpretability matters
+      → R² shows "model quality" at a glance.
 
 
-Use Adjusted R² when comparing models with different numbers of features.
+5. Adjusted R²
+--------------------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    Adjusted R² = 1 − [(1 − R²) * (n − 1) / (n − p − 1)]
+
+Where:
+    n = number of data points
+    p = number of predictors (features)
+
+Meaning:
+    - Adjusts R² for number of predictors.
+    - Penalizes adding irrelevant features.
+    - Only increases if the new feature genuinely improves model performance.
+
+When to use:
+    - Comparing models with different numbers of features.
+    - Avoiding overfitting when adding more predictors.
+
+Practical Scenarios:
+    - Feature selection in ML pipelines
+      → Helps detect if adding new features actually improves the model.
+
+    - Economics models with many correlated variables
+      → Avoids falsely high R² from adding useless predictors.
+
+    - Marketing mix modeling (MMM)
+      → Many candidate features (spend, impressions, seasonality).
+
+    - Real estate pricing model (location, amenities, size)
+      → Prefer simpler models unless new predictors add real value.
