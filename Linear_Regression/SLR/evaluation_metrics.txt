@@ -2,7 +2,7 @@ REGRESSION EVALUATION METRICS
 ==============================
 
 1. Mean Absolute Error (MAE)
-----------------------------------------------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------------
 Formula:
     MAE = (1/n) * Σ |yᵢ − ŷᵢ|
 
@@ -31,7 +31,7 @@ Practical Scenarios:
       → Outliers (holiday spikes) shouldn’t dominate.
 
 2. Mean Squared Error (MSE)
----------------------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------
 Formula:
     MSE = (1/n) * Σ (yᵢ − ŷᵢ)²
 
@@ -47,7 +47,6 @@ Characteristics:
 When to use:
     - When large mistakes must be penalized strongly.
     - Financial forecasting, risk estimation, anomaly detection.
-
 
 Practical Scenarios:
     - Loan default prediction (banks)

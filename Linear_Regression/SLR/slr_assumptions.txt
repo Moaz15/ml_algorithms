@@ -1,5 +1,28 @@
 Assumptions of Linear Regression 
-1. 
+
+1. Linearity (Correct Model Specification)
+The relationship between predictors and the target is linear in parameters.
+
+y=β0​+β1​X1​+β2​X2​+⋯+ε
+
+X itself does not have to be linear
+The model must be linear in coefficients (β)
+
+Why it matters:
+
+If the true relationship is nonlinear and you fit a straight line:
+Residuals show patterns
+Predictions are biase
+All inference becomes unreliable
+
+How to detect:
+Residuals vs X plot shows curvature
+Residuals vs ŷ shows systematic pattern
+
+Fixes:
+Add polynomial terms
+Transform variables (log, sqrt)
+Add interaction terms
 
 2. Independence of Errors (No Autocorrelation)
 --------------------------------------------------------------------------------------------------------------------------------------

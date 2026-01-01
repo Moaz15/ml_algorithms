@@ -2,15 +2,15 @@ import numpy as np
 
 class SimpleLinearRegression:
     def __init__(self):
-        self.m = 0
-        self.c = 0
+        self.m = 0.0
+        self.c = 0.0
 
     def fit_ols(self,X,y):
         """
-        Train the model using Ordinary Least Squares (OLS) formula.
+        Train the model using Ordinary Least Squares (OLS) closed-form solution.
         """
-        X = np.array(X,dtype=float)
-        y = np.array(y,dtype=float)
+        X = np.array(X, dtype=float)
+        y = np.array(y, dtype=float)
 
         x_mean = np.mean(X)
         y_mean = np.mean(y)
@@ -18,6 +18,11 @@ class SimpleLinearRegression:
         numerator = np.sum((X-x_mean)*(y-y_mean))
         denominator = np.sum((X-x_mean)**2)
 
+        if np.isclose(denominator,0.0):
+            self.m = 0.0
+            self.c = y_mean
+            return 
+        
         self.m = numerator/denominator
         self.c = y_mean - self.m*x_mean
 
