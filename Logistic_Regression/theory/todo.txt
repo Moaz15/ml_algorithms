@@ -1,0 +1,11 @@
+1. complete multiclass logisitic 
+2. scratch code for multiclass logisitic regression
+3. One-vs-Rest vs Softmax comparison approach for Logistic regression , code level also
+4. MLE in detail ( likelihood , for normal distribution, relation with loss functions , why in ML )
+5. Assumptions of Logistic Regression 
+6. odds and logit 
+7. Logistic Regression Hyperparameters
+8. Regularization in Logistic Regression
+9. Feature importance using logisitic regression 
+10. Polynomial Features
+11. praactice with a dataset 

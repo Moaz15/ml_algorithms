@@ -1,0 +1,196 @@
+Multiclass Logistic Regression (Softmax) — Complete Derivation
+
+1. Problem Statement
+
+We are solving a multiclass classification problem.
+
+Given:
+Input features:
+x = (x1, x2, ..., xn), x ∈ R^n
+Output label:
+y ∈ {1, 2, ..., K}
+Where: K = number of classes
+
+Examples:
+Predict the genre of a show (Drama, Crime, Comedy, Romance)
+Predict user intent (Browse, Search, Listen, Exit)
+
+2. What Is the Goal?
+
+Our goal is to predict a probability distribution over all classes.
+For each input x, we want:
+P(y = k | x) for k = 1, 2, ..., K
+
+Properties:
+Each probability is between 0 and 1
+Probabilities across all classes sum to 1
+
+Final prediction:
+Predicted class =  argmaxkP(y=k∣x)=the class with the highest probability
+	​
+| Class (k) | Probability |
+| --------- | ----------- |
+| 1         | 0.10        |
+| 2         | 0.60        |
+| 3         | 0.20        |
+| 4         | 0.10        |
+
+maxₖ P(y=k|x) = 0.60
+argmaxₖ P(y=k|x) = 2
+✅ Predicted class = 2
+
+3. Extending the Linear Model to Multiple Classes
+
+In binary logistic regression, we had one linear score.
+For multiclass classification, we compute one score per class.
+
+For class k:
+zk = θk^T x + bk
+
+Where:
+θk is the weight vector for class k
+bk is the bias for class k
+
+Collectively:
+
+Θ is a (K × n) weight matrix
+b is a (K × 1) bias vector
+z is a (K × 1) score vector
+
+4. Why Sigmoid Is Not Enough
+
+Sigmoid works for binary classification because:
+There are only two outcomes
+In multiclass classification:
+We need probabilities for K > 2 classes
+Probabilities must sum to 1
+So we need a different function.
+
+5. Softmax Function (Mapping Scores to Probabilities)
+
+The Softmax function converts class scores into probabilities:
+For class k: P(y = k | x) = exp(zk) / Σ exp(zj) (j = 1 to K)
+
+Properties:
+Output is between 0 and 1
+Sum of probabilities = 1
+Higher score → higher probability
+Relative differences between scores matter
+
+6. Multiclass Logistic Regression Hypothesis
+
+The model prediction is: ŷk = P(y = k | x) = exp(θk^T x + bk) / Σ exp(θj^T x + bj)
+For all classes k = 1 to K
+
+Numerator uses k(specific class)
+Denominator sums over j(all classes)
+
+7. True Labels Representation (One-Hot Encoding)
+
+To define a loss function, we represent labels using one-hot encoding.
+For a data point with true class t:
+y = [0, 0, ..., 1, ..., 0]
+Where:
+yt = 1
+All other entries are 0
+
+8. How Do We Measure Prediction Error?
+
+The model predicts a probability distribution.
+We want:
+High probability for the true class
+Low probability for incorrect classes
+
+9. Categorical Cross-Entropy Loss (Single Example)
+
+Loss for one training example:
+L = - Σ [ yk * log(ŷk) ] (k = 1 to K)
+Because y is one-hot encoded, this simplifies to:
+L = - log(ŷt)
+Where t is the true class.
+
+WHY DOES THIS LOSS FUNCTION MAKE SENSE?
+
+Thinking in Terms of Probabilities
+
+For each input x, the model predicts:
+ŷ = [P(y=1|x), P(y=2|x), ..., P(y=K|x)]
+A good model assigns:
+High probability to the true class
+Low probability to all others
+
+Probability of One Data Point
+Using one-hot labels:
+P(y | x) = Π (ŷk^yk)
+Since only one yk = 1, this becomes:
+P(y | x) = ŷt
+
+Probability of the Entire Dataset (Likelihood)
+
+Assuming independence:
+P(data) = Π Π (ŷik^yik)
+This is the likelihood.
+
+Maximum Likelihood Estimation (MLE)
+
+MLE means:
+Choose parameters (Θ, b) such that the observed class labels are as probable as possible under the model.
+
+From Likelihood to Loss
+
+Taking log-likelihood:
+log P(data) =
+Σ Σ [ yik * log(ŷik) ]
+
+Minimizing negative average log-likelihood gives:
+Categorical Cross-Entropy Loss
+
+What Are We Learning?
+
+We learn:
+Weight vectors θ1, θ2, ..., θK
+Bias terms b1, b2, ..., bK
+Each class has its own linear decision function.
+
+Decision Boundaries
+
+Between any two classes i and j:
+(θi − θj)^T x + (bi − bj) = 0
+Decision boundaries are linear.
+
+Learning the Parameters (Gradient Descent)
+
+The gradient of the loss with respect to each class weight vector:
+∂J / ∂θk = (1 / m) * X^T (ŷk − yk)
+
+Bias gradient:
+∂J / ∂bk = (1 / m) * Σ (ŷik − yik)
+
+Parameter Update Rules
+
+For each class k:
+
+θk := θk − α * (1 / m) * X^T (ŷk − yk)
+bk := bk − α * (1 / m) * Σ (ŷk − yk)
+
+Why No Closed-Form Solution?
+
+Softmax is non-linear
+Objective is non-quadratic
+No analytical minimum exists
+
+10. Loss Over the Entire Dataset
+
+For m training examples:
+J(Θ, b) = (1 / m) * Σ Σ [ yik * log(ŷik) ]
+This is the objective function we want to minimize.
+
+
+Summary
+
+Multiclass Logistic Regression predicts a probability distribution
+Softmax replaces sigmoid
+Categorical cross-entropy replaces binary cross-entropy
+Loss is derived from MLE
+Each class has its own weights
+Training is done using gradient descent

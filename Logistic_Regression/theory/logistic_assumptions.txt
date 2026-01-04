@@ -1,0 +1,57 @@
+Logistic Regression – Assumptions 
+
+1. Binary or Categorical Outcome
+- The dependent variable must be binary (0/1) for binary logistic regression or categorical for extensions.
+- For 3+ classes: use Multinomial or Ordinal Logistic Regression.
+- Continuous outcomes violate this assumption as logistic regression models discrete class probabilities.
+
+2. Linearity of Logit with Predictors
+- The log-odds (logit) of the outcome should have a linear relationship with the independent variables:
+  log(p / (1 - p)) = β₀ + β₁x₁ + β₂x₂ + ... + βₙxₙ
+- Does NOT require predictors to have a linear relationship with the outcome directly.
+- Check using: Box-Tidwell test, logit plots, or residual analysis.
+- Fix non-linear patterns using: polynomial terms, splines, log/sqrt transformations, or interaction terms.
+
+3. Independence of Observations
+- Each observation should be independent of all others.
+- Violations include time series, clustered data, repeated measures, spatial or network correlation.
+- Detection: Durbin-Watson test (time), ICC (clusters), residual pattern analysis.
+- Fix using: Mixed Effects Models, Generalized Estimating Equations (GEE), or robust standard errors.
+
+4. No Perfect Multicollinearity
+- Predictors should not be perfectly or highly linearly correlated.
+- Perfect or high correlation leads to unstable or non-estimable coefficients.
+- Detection:
+  - Correlation matrix
+  - Variance Inflation Factor (VIF > 5 or 10)
+  - Condition Index > 30
+- Fix using: dropping redundant variables, combining features, regularization (Ridge/Lasso), PCA.
+
+5. Adequate Sample Size
+- Rule of thumb: 10–15 observations per predictor variable.
+- Rare class: minimum 10 events per predictor in the minority class.
+- Small samples lead to: poor convergence, unstable estimates, overfitting, or complete separation.
+- Fixes: Penalized likelihood (e.g., Firth’s correction), Exact Logistic Regression, reducing model complexity, or collecting more data.
+
+6. No Extreme Outliers
+- Outliers can distort model coefficients and reduce predictive accuracy.
+- Types:
+  - High leverage points (extreme predictor values)
+  - High influence points (large effect on coefficients)
+- Detection tools: Cook’s Distance, Hat values, Standardized residuals, DfBeta.
+- Remedies:
+  - Investigate and clean data
+  - Use robust logistic regression
+  - Transform features
+  - Carefully remove if clearly erroneous
+
+Summary:
+Logistic Regression assumes:
+- A binary/categorical outcome
+- Linear relationship between logit and predictors
+- Independent observations
+- No perfect multicollinearity
+- Sufficient sample size
+- No extreme outliers
+
+Meeting these assumptions ensures stable, interpretable, and valid results.
