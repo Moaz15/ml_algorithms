@@ -79,73 +79,115 @@ Relative differences between scores matter
 
 6. Multiclass Logistic Regression Hypothesis
 
-The model prediction is: ŷk = P(y = k | x) = exp(θk^T x + bk) / Σ exp(θj^T x + bj)
-For all classes k = 1 to K
+For a given input x, the model computes one score per class.
+These scores are converted into probabilities using the Softmax function.
 
-Numerator uses k(specific class)
-Denominator sums over j(all classes)
+For class k:
+ŷₖ = P(y = k | x)= exp(θₖᵀx + bₖ) / Σ exp(θⱼᵀx + bⱼ)
+
+Where:
+
+k → current class
+j → runs over all classes (1 to K)
+
+Explanation:
+Numerator → score of class k
+Denominator → sum of scores of all classes
+
+This ensures:
+All probabilities are between 0 and 1
+Probabilities across classes sum to 1
+
+The output is a probability distribution over all classes.
 
 7. True Labels Representation (One-Hot Encoding)
 
-To define a loss function, we represent labels using one-hot encoding.
-For a data point with true class t:
+To compare predictions with the true label, we represent the label using one-hot encoding.
+If the true class is t, the label vector is:
+
 y = [0, 0, ..., 1, ..., 0]
 Where:
-yt = 1
-All other entries are 0
+yₜ = 1
+All other entries = 0
+This means:
+“This class is correct”
+“All other classes are incorrect”
 
-8. How Do We Measure Prediction Error?
+8. What Does Prediction Error Mean?
 
-The model predicts a probability distribution.
+The model predicts probabilities, not a single value.
+
 We want:
 High probability for the true class
-Low probability for incorrect classes
+Low probability for all incorrect classes
+
+So the error should increase when:
+The true class gets low probability
+A wrong class gets high probability
 
 9. Categorical Cross-Entropy Loss (Single Example)
 
-Loss for one training example:
-L = - Σ [ yk * log(ŷk) ] (k = 1 to K)
+The loss for one training example is:  L = − Σ [ yₖ · log(ŷₖ) ] (k = 1 to K)
+
 Because y is one-hot encoded, this simplifies to:
-L = - log(ŷt)
-Where t is the true class.
+L = − log(ŷₜ)
 
-WHY DOES THIS LOSS FUNCTION MAKE SENSE?
+Where:
+t is the true class
 
+Meaning:
+If the model assigns high probability to the true class → loss is small
+If it assigns low probability → loss is large
+
+Why Does This Loss Function Make Sense?
 Thinking in Terms of Probabilities
 
 For each input x, the model predicts:
+
 ŷ = [P(y=1|x), P(y=2|x), ..., P(y=K|x)]
-A good model assigns:
-High probability to the true class
-Low probability to all others
+
+A good model should:
+Assign high probability to the correct class
+Assign low probability to all others
 
 Probability of One Data Point
+
 Using one-hot labels:
-P(y | x) = Π (ŷk^yk)
-Since only one yk = 1, this becomes:
-P(y | x) = ŷt
+P(y | x) = Π (ŷₖʸᵏ)
+Since only one yₖ = 1, this becomes:
+P(y | x) = ŷₜ
+
+So the probability of the data point is just the probability assigned to the true class.
 
 Probability of the Entire Dataset (Likelihood)
 
-Assuming independence:
-P(data) = Π Π (ŷik^yik)
-This is the likelihood.
+Assuming all data points are independent:
+P(data) = Π Π (ŷᵢₖʸᵢₖ)
+This is called the likelihood.
 
 Maximum Likelihood Estimation (MLE)
 
 MLE means:
-Choose parameters (Θ, b) such that the observed class labels are as probable as possible under the model.
+
+Choose model parameters (Θ, b) so that the probability of the observed labels is maximized.
+In simple terms:
+The model should give high probability to what actually happened.
 
 From Likelihood to Loss
 
-Taking log-likelihood:
-log P(data) =
-Σ Σ [ yik * log(ŷik) ]
+Taking the log of the likelihood converts products into sums:
+log P(data) = Σ Σ [ yᵢₖ · log(ŷᵢₖ) ]
+Machine learning minimizes loss, so we take the negative average:
+→ Categorical Cross-Entropy Loss
 
-Minimizing negative average log-likelihood gives:
-Categorical Cross-Entropy Loss
+9. Loss Over the Entire Dataset
 
-What Are We Learning?
+For m training examples:
+J(Θ, b) = (1 / m) * Σ Σ [ yik * log(ŷik) ]
+This is the objective function we want to minimize.
+
+
+10. What Are We Learning?
 
 We learn:
 Weight vectors θ1, θ2, ..., θK
@@ -158,15 +200,95 @@ Between any two classes i and j:
 (θi − θj)^T x + (bi − bj) = 0
 Decision boundaries are linear.
 
-Learning the Parameters (Gradient Descent)
+11. Learning the Parameters (Gradient Descent)
 
-The gradient of the loss with respect to each class weight vector:
-∂J / ∂θk = (1 / m) * X^T (ŷk − yk)
+How Do We Get the Gradients in Multiclass Logistic Regression?
 
-Bias gradient:
-∂J / ∂bk = (1 / m) * Σ (ŷik − yik)
+Goal : 
+We want to compute how the loss changes with respect to:
+The weight vector of each class (θ_k)
+The bias of each class (b_k)
 
-Parameter Update Rules
+Step 1: Loss for One Training Example
+
+For one data point (x_i, y_i), the categorical cross-entropy loss is:  L_i = - Σ [ y_ik * log(ŷ_ik) ] for k = 1 to K
+
+Here:
+y_ik is the one-hot encoded true label
+ŷ_ik is the predicted probability for class k
+
+Because y is one-hot encoded, only the true class contributes.
+So the loss simplifies to:
+L_i = - log(ŷ_i,t)
+where t is the true class.
+
+Step 2: How Parameters Affect the Loss
+
+Model parameters affect the loss through the following chain:
+θ_k , b_k → z_ik = θ_k^T x_i + b_k → ŷ_ik = softmax(z_i) → L_i
+
+Step 3: Key Result from Softmax + Cross-Entropy
+
+When softmax is combined with categorical cross-entropy, the derivative of the loss with respect to the score z_ik becomes:
+∂L_i / ∂z_ik = ŷ_ik - y_ik
+This is the multiclass version of the error term.
+Interpretation:
+If predicted probability is higher than the true label → positive error
+If predicted probability is lower → negative error
+
+Step 4: Gradient with Respect to Weights (Single Example)
+
+Recall the score function:
+z_ik = θ_k^T x_i + b_k
+Derivative of z_ik with respect to θ_k:
+∂z_ik / ∂θ_k = x_i
+
+Using the chain rule:
+∂L_i / ∂θ_k = (ŷ_ik - y_ik) * x_i
+
+Step 5: Gradient with Respect to Bias (Single Example)
+
+Derivative of z_ik with respect to b_k:
+
+∂z_ik / ∂b_k = 1
+So:
+∂L_i / ∂b_k = ŷ_ik - y_ik
+
+Step 6: Average Over the Entire Dataset
+
+Now average the gradients over all m training examples.
+
+Gradient with respect to weights of class k:
+∂J / ∂θ_k
+= (1 / m) * Σ (ŷ_ik - y_ik) * x_i
+
+Gradient with respect to bias of class k:
+∂J / ∂b_k
+= (1 / m) * Σ (ŷ_ik - y_ik)
+
+Step 7: Vectorized Form
+
+Let:
+X be the data matrix of shape (m, n)
+ŷ_k be the vector of predicted probabilities for class k (shape m,)
+y_k be the vector of true labels for class k (shape m,)
+
+Then the gradients can be written compactly as:
+
+Gradient w.r.t. weights of class k:
+∂J / ∂θ_k = (1 / m) * X^T (ŷ_k - y_k)
+
+Gradient w.r.t. bias of class k:
+∂J / ∂b_k = (1 / m) * Σ (ŷ_ik - y_ik)
+
+Key Intuition : 
+
+(ŷ_k - y_k) represents the probability error for class k
+X^T distributes this error across features
+Each class learns its own weights and bias
+Softmax couples classes through probabilities, but gradients remain simple
+
+Parameter Update Rules : 
 
 For each class k:
 
@@ -179,18 +301,20 @@ Softmax is non-linear
 Objective is non-quadratic
 No analytical minimum exists
 
-10. Loss Over the Entire Dataset
-
-For m training examples:
-J(Θ, b) = (1 / m) * Σ Σ [ yik * log(ŷik) ]
-This is the objective function we want to minimize.
-
 
 Summary
 
-Multiclass Logistic Regression predicts a probability distribution
-Softmax replaces sigmoid
-Categorical cross-entropy replaces binary cross-entropy
-Loss is derived from MLE
-Each class has its own weights
-Training is done using gradient descent
+Multiclass Logistic Regression predicts a probability distribution.
+Softmax replaces sigmoid.
+Categorical cross-entropy replaces binary cross-entropy.
+Loss is derived from MLE.
+Each class has its own weights.
+Training is done using gradient descent.
+
+
+
+| Model         | Weights                | Bias      |
+| ------------- | ---------------------- | --------- |
+| Binary LR     | n_features             | 1         |
+| Multiclass LR | n_classes × n_features | n_classes |
+

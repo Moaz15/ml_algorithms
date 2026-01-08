@@ -46,6 +46,21 @@ Large positive z → probability close to 1
 Large negative z → probability close to 0
 sigmoid is always a monotonic function
 
+Why Sigmoid Must Be Monotonic
+
+Definition:
+A monotonic function is one that is either entirely non-increasing or non-decreasing.
+The sigmoid function used in logistic regression is strictly increasing:
+σ(z) = 1 / (1 + e^(−z))
+
+Benefits of Monotonicity:
+1. Rank Preservation: More positive z → higher probability
+2. Predictable Thresholding: Thresholds like 0.5 work reliably
+3. Smooth Optimization: Gradient always positive, aiding convergence
+4. Interpretability: Higher distance → higher probability for class 1
+
+
+
 5. Logistic Regression Hypothesis Function
 
 The model prediction is:
@@ -56,8 +71,8 @@ P(y = 0 | x) = 1 - ŷ
 6. How Do We Measure Prediction Error?
 
 Since the model predicts probabilities, we need a loss function that:
-Penalizes confident wrong predictions
-Works naturally with probabilities
+1.Penalizes confident wrong predictions
+2.Works naturally with probabilities
 
 7. Binary Cross-Entropy Loss (Single Example)
 
@@ -91,7 +106,7 @@ Probability of One Data Point
 If y = 1:  P(y | x) = ŷ
 If y = 0:  P(y | x) = 1 - ŷ
 
-This can be written compactly as:
+This can be written compactly as :
 P(y | x) = ŷ^y * (1 - ŷ)^(1 - y)
 
 Probability of the Entire Dataset
@@ -208,5 +223,3 @@ Sigmoid maps linear scores to probabilities
 Cross-entropy measures probability mismatch
 MLE explains why this loss is correct
 Gradient descent learns optimal parameters
-
-
