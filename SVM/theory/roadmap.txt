@@ -1,0 +1,51 @@
+SVM/
+│
+├── 01_intuition/
+│   ├── concept.txt
+│   ├── margin_intuition.txt
+│   └── support_vectors.txt
+│
+├── 02_hard_margin/
+│   ├── theory.txt
+│   ├── mathematical_formulation.txt
+│   ├── optimization_primal.txt
+│   └── scratch_hard_margin.py
+│
+├── 03_soft_margin/
+│   ├── slack_variables.txt
+│   ├── role_of_C.txt
+│   ├── bias_variance_tradeoff.txt
+│   └── scratch_soft_margin.py
+│
+├── 04_optimization_and_duality/
+│   ├── lagrange_multipliers.txt
+│   ├── constrained_optimization.txt
+│   ├── kkt_conditions.txt
+│   └── dual_problem_derivation.txt
+│
+├── 05_kernels/
+│   ├── kernel_trick.txt
+│   ├── mercer_theorem.txt
+│   ├── linear_kernel.txt
+│   ├── polynomial_kernel.txt
+│   ├── rbf_kernel.txt
+│   ├── kernel_hyperparameters.txt
+│   └── custom_kernels.txt
+│
+├── 06_practical_svm/
+│   ├── scaling_importance.txt
+│   ├── hyperparameter_tuning.txt
+│   ├── imbalanced_data.txt
+│   ├── multiclass_svm.txt
+│   └── svm_vs_logistic.txt
+│
+├── 07_regression/
+│   ├── svr_concept.txt
+│   └── svr_example.py
+│
+├── 08_code_examples/
+│   ├── sklearn_linear_svm.py
+│   ├── sklearn_rbf_svm.py
+│   └── decision_boundary_visualization.py
+│
+└── README.md

@@ -27,3 +27,5 @@ def predict_ctr(data: InputData):
         "probability": float(prob),
         "prediction": prediction
     }
+
+

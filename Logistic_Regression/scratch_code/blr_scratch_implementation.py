@@ -19,7 +19,7 @@ class BinaryLogisticRegression:
         return 1.0/(1.0 + np.exp(-z))
     
     def _initialize(self,n_features):
-        self.theta =  np.zeros(n_features, d_type= float) 
+        self.theta =  np.zeros(n_features, dtype= float) 
         self.bias = 0.0
 
     def _compute_loss(self, y, y_hat, m):
@@ -41,9 +41,9 @@ class BinaryLogisticRegression:
         best_loss = float("inf")
         no_improve = 0
         
-        for i in range(self.num_iter):
+        for _ in range(self.num_iter):
             z = np.dot(X,self.theta) + self.bias
-            y_hat = self.sigmoid(z)
+            y_hat = self._sigmoid(z)
 
             error = y_hat - y
 
@@ -55,20 +55,23 @@ class BinaryLogisticRegression:
             self.theta -= self.lr * d_theta
             self.bias -= self.lr * d_bias
 
-            # regularized loss
-            loss = -np.mean(y * np.log(y_hat + 1e-9) + (1 - y) * np.log(1 - y_hat + 1e-9))
-            loss += (self.lambda_ / (2*m)) * np.sum(self.theta ** 2)
-
-            if i%100 == 0:
-                print(f"Iteration {i}, Loss: {loss:.4f}")
+            loss = self._compute_loss(y,y_hat,m)
             self.loss_history.append(loss)
-    
+
+            if best_loss - loss > self.tol:
+                best_loss = loss
+                no_improve = 0
+            else:
+                no_improve += 1
+                if no_improve >= self.patience:
+                    break
+        return self
+
     def predict_prob(self,X):
+        X  = np.asarray(X,dtype=float)
         z = np.dot(X,self.theta) + self.bias
         return self.sigmoid(z)
     
     def predict(self,X,threshold = 0.5):
         return(self.predict_prob(X) >=threshold).astype(int)
-    
-
 
