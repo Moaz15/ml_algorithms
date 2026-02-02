@@ -1,0 +1,101 @@
+Hard Margin SVM (Theory + Formulation)
+
+Hard Margin SVM is the simplest form of SVM. It assumes the data is perfectly linearly separable,
+meaning there exists a hyperplane that can separate the two classes with zero mistakes.
+
+Goal (Maximum Margin Hyperplane)
+--------------------------------
+Hard Margin SVM finds a hyperplane that:
+1) Separates all training points correctly
+2) Maximizes the margin (safety gap) between the two classes
+
+Decision Boundary
+-----------------
+The decision boundary is:
+
+w · x + b = 0
+
+Where:
+- w controls the direction of the boundary
+- b controls the position of the boundary
+
+A point is classified as:
+- +1 if (w · x + b) > 0
+- −1 if (w · x + b) < 0
+
+Margin Boundaries
+-----------------
+SVM defines two parallel boundaries:
+
+w · x + b = +1
+w · x + b = −1
+
+The distance between them is the margin.
+
+Margin Formula
+--------------
+Margin = 2 / ||w||
+
+So:
+- smaller ||w||  → larger margin
+- larger ||w||   → smaller margin
+
+This means maximizing the margin is equivalent to minimizing ||w||.
+
+Distance of a Point from the Hyperplane (Geometric Meaning)
+-----------------------------------------------------------
+The perpendicular distance of a point x from the decision boundary is:
+
+|w · x + b| / ||w||
+
+Hard Margin Constraints
+-----------------------
+To ensure correct classification with a margin, SVM enforces:
+
+y_i (w · x_i + b) ≥ 1   for all i
+
+Why “≥ 1” and not “≥ 0”?
+- ≥ 0 only ensures correct side of the boundary
+- ≥ 1 ensures correct side + minimum distance (margin)
+- It also fixes the scale of (w, b)
+
+Final Optimization Problem (Primal Form)
+----------------------------------------
+Minimize:
+1/2 ||w||²
+
+Subject to:
+y_i (w · x_i + b) ≥ 1   for all training points
+
+This is called the primal form because it is written in terms of the original parameters (w, b).
+
+Support Vectors
+---------------
+Only points that satisfy:
+
+y_i (w · x_i + b) = 1
+
+directly influence the boundary. These points are called support vectors.
+All other points do not affect the solution once the margin is fixed.
+
+Prediction Rule
+---------------
+Once w and b are learned, prediction is done using:
+
+y_hat = sign(w · x + b)
+
+Limitations
+-----------
+Hard Margin SVM is very sensitive to:
+- noise
+- outliers
+- label errors
+
+If even one point violates the constraint, Hard Margin SVM fails.
+This is why Soft Margin SVM (with slack variables) is needed.
+
+Key Takeaway
+------------
+Hard Margin SVM = perfect separation + maximum margin.
+It is mainly used to understand the foundation of SVM.
+
