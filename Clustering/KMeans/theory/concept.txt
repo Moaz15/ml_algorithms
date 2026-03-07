@@ -1,0 +1,177 @@
+What is K-Means? (Partition / Centroid-based clustering)
+------------------------------------------------------------------------------------------------------------------------------
+Unsupervised clustering algorithm that partitions data into K clusters.
+Goal/Objective: minimize within-cluster sum of squares (WCSS / inertia)
+
+Produces K non-overlapping clusters + a centroid (mean) for each cluster.
+Similarity measure: typically Euclidean distance (so scaling matters).
+Output: cluster assignment for each point + centroid locations.
+Best for: roughly spherical/convex, similar-sized clusters; works well in low–moderate dimensions.
+
+
+K-Means Working Steps
+------------------------------------------------------------------------------------------------------------------------------
+1.Choose K
+Methods: Elbow (WCSS/inertia), Silhouette score, domain knowledge.
+
+2.Initialize centroids
+Random K points or K-Means++ (preferred) for better stability.
+
+3.Assignment step (E-step)
+Assign each point to the nearest centroid (commonly Euclidean distance).
+
+4.Update step (M-step)
+Recompute each centroid as the mean of points in that cluster.
+
+5.Repeat
+Alternate assignment ↔ update until convergence.
+
+6.Convergence criteria
+Centroids change < tolerance, or
+Assignments stop changing, or
+Max iterations reached.
+
+Key notes: each iteration non-increasing WCSS; can converge to a local optimum (use multiple restarts).
+
+
+Assumptions of K-Means
+------------------------------------------------------------------------------------------------------------------------------
+1. Cluster Shape: Spherical/Convex
+   - Clusters are expected to be roughly ball-shaped and well-separated.
+   - Reason: K-means uses Euclidean distance, which creates Voronoi regions (best for spherical shapes). Non-convex shapes (like Moons or Circles) often get misclustered.
+
+2. Cluster Size & Density: Uniform
+   - Clusters should be of similar size and similar density.
+   - Reason: The algorithm minimizes the Sum of Squared Errors (SSE), which biases it toward equal-radius partitions. Dense or small clusters may be absorbed by larger, more spread-out ones.
+
+3. Feature Type: Numeric & Continuous
+   - Relies strictly on means and Euclidean distance.
+   - Reason: Centroids are computed as the average (mean) of points. This isn't meaningful for categorical data (use K-Modes or K-Prototypes for those).
+
+4. Feature Scaling: Normalized/Standardized
+   - All features should contribute equally to the distance calculation.
+   - Reason: Euclidean distance is highly sensitive to the scale of features. Larger-range features will dominate the clustering process unless standardized.
+
+5. Cluster Membership: Hard Assignment
+   - Each data point belongs to exactly one cluster with no overlap.
+   - Reason: Points are assigned to the single nearest centroid. It cannot model probabilistic or overlapping memberships (Gaussian Mixture Models are better for this).
+
+6. Number of Clusters: Predefined
+   - The value of 'K' must be chosen upfront.
+   - Reason: Optimization is conditioned on a fixed K; the algorithm does not infer the optimal number of clusters automatically.
+
+7. Noise & Outliers: Low Sensitivity
+   - K-means is very sensitive to outliers.
+   - Reason: Since squared distances are used in the objective function, outliers pull centroids significantly away from the true cluster center, distorting the final assignments.
+
+
+Distance Metrics in K-Means
+------------------------------------------------------------------------------------------------------------------------------
+1. Default: Euclidean (L2)
+   - Why Default: Standard K-Means objective is to minimize SSE (Inertia).
+     Formula: Σ ||x - μ||² — this directly corresponds to L2 distance to the mean.
+   - Geometric Intuition: Partitions space into Voronoi cells around centroids; favors spherical/ball-shaped clusters.
+   - Key Property: For L2, the centroid update is simply the arithmetic mean (closed-form optimal solution).
+
+2. Alternative: Manhattan (L1)
+   - Note: Minimizing L1 distances requires the "centroid" to be the median. This is known as K-Medians or K-Medoids, not vanilla K-Means.
+   - Benefit: More robust to outliers than L2 (less performance penalty on distant points).
+
+3. Alternative: Cosine Distance
+   - Application: Common for text and high-dimensional embeddings.
+   - Use Case: When the direction of the vector matters more than its magnitude.
+   - Practice: Typically requires L2-normalizing vectors (unit length) before clustering.
+
+4. Can K-Means use Cosine Similarity?
+   - Answer: Yes, but it requires a specific framing.
+   - Mechanism: With L2-normalized vectors, Euclidean distance Squared and Cosine distance are monotonic:
+     ||x - y||² = 2(1 - cos(x, y)) [where ||x|| = ||y|| = 1].
+   - Result: This leads to Spherical K-Means, where centroids are re-normalized to unit length after each update to optimize cosine similarity.
+
+5. Additional Considerations
+   - Minkowski Distance: A general family (L1 and L2 are special cases). Changing the p-value typically changes the required centroid update rule.
+   - Feature Scaling: Crucial! Both Euclidean and Manhattan are highly sensitive to scales; always standardize/normalize first.
+   - Categorical Data: Hamming distance or similar doesn't fit mean-centroid updates; prefer K-Modes or K-Prototypes.
+
+
+Objective Function: WCSS / Inertia
+------------------------------------------------------------------------------------------------------------------------------
+1. Core Definition
+   - WCSS (Within-Cluster Sum of Squares): Also known as inertia, it measures the compactness of clusters.
+   - Meaning: The total squared distance of all points from their assigned cluster centroid. 
+   - Goal: Lower WCSS indicates tighter, more cohesive clusters (for a fixed k).
+
+2. Mathematical Objective
+   Minimize: Σ (i=1 to k) Σ (x ∈ Ci) ||x - μi||²
+
+   Where:
+   - k: Total number of clusters.
+   - Ci: The i-th cluster (the set of points assigned to it).
+   - μi: The centroid (mean) of cluster Ci.
+   - ||x - μi||²: The squared Euclidean distance between point x and centroid μi.
+
+3. Key Interview Points
+   - Centroid Optimality: Using the Squared L2 loss (Euclidean distance squared) is why the optimal centroid update is mathematically the arithmetic mean: μi = mean(Ci).
+   - Convergence: Each iteration of the algorithm (Assignment ↔ Update) is guaranteed to never increase the WCSS. However, it may converge to a local minimum rather than the global optimum (which is why initialization matters).
+
+Choosing the Right Number of Clusters (K)
+------------------------------------------------------------------------------------------------------------------------------
+1. The Elbow Method
+   - Core Idea: As K increases, clusters become smaller and more compact, causing the WCSS (Inertia) to decrease monotonically.
+   - The Elbow Point: The value of K where adding another cluster provides diminishing returns (only a small additional drop in WCSS).
+   - Implementation Steps:
+     1. Run K-Means for a range of K values (e.g., 1 to 10 or 20).
+     2. Compute the WCSS (Inertia) for each K.
+     3. Plot WCSS vs. K.
+     4. Select the K at the "elbow" or "bend" of the curve where the rate of improvement sharply slows down.
+   - Best Use Case: When clusters are well-separated and roughly spherical/convex.
+   - Limitations: The elbow can be ambiguous (subjective) if the curve is smooth. It is also sensitive to feature scaling, outliers, and initialization.
+
+2. Silhouette Score
+   - Core Idea: Provides a quantitative measure (-1 to +1) of overall cluster quality by answering two key questions for each data point i:
+     - Cohesion: How close am I to my own cluster members? (Lower is better)
+     - Separation: How far am I from the nearest neighboring cluster? (Higher is better)
+
+   - Mathematical Formula:
+     - a(i): Intra-cluster distance. Average distance of point i to all other points in the SAME cluster (meaures Cohesion).
+     - b(i): Nearest-cluster distance. Average distance of point i to all points in the NEAREST neighboring cluster (measures Separation).
+     - s(i) = (b(i) - a(i)) / max(a(i), b(i))
+
+   - Why Divide by max(a,b)?
+     - Optimization: It normalizes the score to a fixed scale of -1 to +1. Without this normalization, the score would range from -∞ to +∞, making comparison between datasets impossible.
+
+   - Interpretation of Cases:
+     - s(i) ≈ +1 (a << b): Excellent clustering. Point i is very close to its own cluster and far from others.
+     - s(i) ≈ 0  (a ≈ b): Overlapping clusters. Point i is on the decision boundary between two clusters.
+     - s(i) ≈ -1 (a >> b): Poor clustering. Point i is likely assigned to the wrong cluster.
+
+   - Aggregate Goal:
+     - Avg Silhouette Score = Σ s(i) / n
+     - The closer the average score is to +1, the higher the overall clustering quality.
+
+   - Why Use Silhouette Score?
+     1. Robust metric combining both Cohesion and Separation.
+     2. Provides a tangible, quantitative measure of cluster quality.
+     3. Helps determine the optimal K automatically by maximizing the average score.
+     4. Agnostic to the specific clustering algorithm used.
+
+   - Limitations to Consider:
+     1. Computationally Expensive: Requires calculating all-to-all distances [O(N²)].
+     2. Shape Bias: Assumes well-separated, convex clusters; fails on complex, non-convex shapes.
+     3. Density Sensitivity: Less reliable for clusters with significant variations in size or density.
+     4. Outlier Sensitivity: Individual scores can be heavily distorted by extreme values.
+     5. Hard Clustering Only: Not suitable for modeling probabilistic or "soft" memberships.
+
+
+
+3. Gap Statistic
+   - Core Idea: Compares the WCSS of the observed data against the WCSS of a reference dataset with a uniform random distribution (no clusters).
+   - Logic: A significant gap indicates that the data has a strong underlying cluster structure compared to random noise.
+   - Selection: Choose the K that maximizes Gap(k) = E[log(WCSS_random)] - log(WCSS_data).
+
+4. Domain Knowledge
+   - Core Idea: Using prior business or scientific information to pre-determine the number of clusters.
+   - Examples:
+     - Market Segmentation: Creating specific "Low", "Medium", and "High" value customer tiers (K=3).
+     - Image Compression: Reducing a complex color space to a specific palette of 8 or 16 primary colors.
+

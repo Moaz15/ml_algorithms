@@ -1,0 +1,13 @@
+1. what is kmeans  : partition based clustering (Centroid based)  done
+2. objective function (WCSS) done 
+3. Algorithm steps  done 
+4. Distance Metrics done 
+5. Choosing K  done 
+6. Initialization Problem 
+7. TC 
+8. Limitations 
+9. When to use and not to use 
+10. scaling for large users 
+11. scratch implementation 
+
+
