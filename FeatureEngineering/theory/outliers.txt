@@ -1,0 +1,27 @@
+Understanding Outliers
+---------------------------------------
+Outliers are extreme data points that deviate significantly from central patterns, typically arising from human error, faulty instruments, or genuine rare events.
+They are categorized into global (extreme across the whole dataset), contextual (abnormal only in specific conditions), and collective (a sequence or group of anomalous points).
+
+Impact on Machine Learning Models
+---------------------------------------
+Linear & Logistic Regression (Highly Sensitive): Outliers skew the ordinary least squares line, heavily inflate error metrics like RMSE, and distort classification decision boundaries.
+AdaBoost (Extremely Sensitive): Because it sequentially increases the weight of misclassified points, AdaBoost disproportionately focuses on outliers, leading to severe overfitting to noise.
+Deep Learning (Highly Sensitive): Outliers can trigger massive gradient updates (exploding gradients), destabilize the loss landscape, and cause the network to perfectly memorize noise due to its high capacity.
+Tree-Based Models (Robust): Algorithms like Decision Trees, Random Forests, and XGBoost naturally quarantine extreme values into specific leaf nodes, preventing them from skewing the overall model structure (provided the model is not overfitted).
+
+
+Detection Methods
+---------------------------------------
+Z-Score: Ideal for normally distributed data; it identifies outliers as data points falling beyond 3 standard deviations from the mean.
+Interquartile Range (IQR): Best suited for skewed distributions; it flags points falling below Q1−1.5×IQR or above Q3+1.5×IQR.
+Median Absolute Deviation (MAD): A robust method that relies on the median rather than the mean, making it highly resistant to extreme values in heavy-tailed data.
+Multivariate Techniques: Mahalanobis Distance detects outliers by factoring in the correlations between multiple variables, while algorithms like Isolation Forest, Local Outlier Factor (LOF), and One-Class SVM isolate anomalies in high-dimensional spaces.
+
+
+Treatment and Remediation Strategies
+---------------------------------------
+Trimming: Involves completely removing outlier records; it is effective for known errors but risks making the dataset too thin and losing real-world variance.
+Winsorization (Capping): Replaces extreme values with a predetermined threshold (e.g., capping values at the 5th and 95th percentiles), successfully mitigating outlier impact while preserving the total sample size.
+Transformations & Binning: Logarithmic or Box-Cox transformations compress extreme values inward, while discretization (binning) groups continuous variables into intervals to hide extreme spikes.
+Neural Network Regularization: For deep learning, combining robust loss functions (like Huber or Transformed Trimmed Loss) with Higher-Order Variation Regularization helps the network ignore outliers while maintaining its ability to learn complex patterns.
