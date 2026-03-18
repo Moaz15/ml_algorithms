@@ -9,5 +9,4 @@
 9. When to use and not to use 
 10. scaling for large users 
 11. scratch implementation 
-
-
+12. computational complexity 
