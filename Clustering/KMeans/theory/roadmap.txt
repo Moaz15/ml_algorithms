@@ -3,10 +3,10 @@
 3. Algorithm steps  done 
 4. Distance Metrics done 
 5. Choosing K  done 
-6. Initialization Problem 
+6. Initialization Problem done 
 7. TC 
-8. Limitations 
-9. When to use and not to use 
+8. Limitations done 
+9. When to use and not to use done 
 10. scaling for large users 
 11. scratch implementation 
 12. computational complexity 

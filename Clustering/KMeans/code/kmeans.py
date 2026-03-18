@@ -45,6 +45,29 @@ class KMeans:
                 centroids[k] = X[np.random.choice(X.shape[0])]
         return centroids
     
+    def compute_distances(self, X, centroids):
+        """
+        Compute distances of each point to each centroid: Output shape: (n_samples, K)
+        """
+        return np.linalg.norm(X[:,np.newaxis] - centroids,axis=2)
+    
+    def assign_labels(self,distances):
+        """
+        Assign each point to nearest centroid.
+        """
+        return np.argmin(distances, axis=1)
+    
+    
+    
+
+    
+    
+
+    
+
+
+
+    
     
 
 

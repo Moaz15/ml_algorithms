@@ -60,7 +60,7 @@ Assumptions of K-Means
    - The value of 'K' must be chosen upfront.
    - Reason: Optimization is conditioned on a fixed K; the algorithm does not infer the optimal number of clusters automatically.
 
-7. Noise & Outliers: Low Sensitivity
+7. Noise & Outliers: High Sensitivity
    - K-means is very sensitive to outliers.
    - Reason: Since squared distances are used in the objective function, outliers pull centroids significantly away from the true cluster center, distorting the final assignments.
 
@@ -315,3 +315,121 @@ Mini Batch K-Means
     - It provides results that are often very close to standard K-Means.
     - It's the preferred method for large-scale K-Means clustering.
 
+When to USE K-Means (Optimal Scenarios)
+------------------------------------------------------------------------------------------------------------------------------
+1.Evenly Sized Clusters: 
+Use K-Means when you suspect your clusters have roughly the same number of observations. 
+K-Means tries to partition space equally; it works beautifully for "balanced" groups.
+
+2.Distance-Based Similarity: Use it when the "Euclidean distance" between two points actually means something in your domain (e.g., physical location coordinates or standardized sensor readings).
+
+3.High-Speed Prototyping: When you need a "baseline" model. Because it's an $O(n)$ algorithm, it is the fastest way to get a rough sense of the structure of a massive dataset before trying more complex methods.
+
+4.Feature Quantization: Use it when your goal is data compression. For example, reducing a 24-bit color image to a 16-color palette by clustering similar pixel values.
+
+5.Circular/Spherical Topology: Use it when the features are independent and have similar variances, creating "blob-like" structures in space.
+
+When NOT to Use K-Means (Structural Constraints)
+------------------------------------------------------------------------------------------------------------------------------
+1.Manifold/Non-Convex Shapes: 
+Avoid K-Means if your data follows a "path" or a "shape" (like a spiral or a C-shape). 
+K-Means is a linear classifier at its heart; it creates Voronoi cells (straight-line boundaries), so it cannot "curve" around data.
+
+2.Overlapping Distributions: If your data points could belong to two groups at once (e.g., a customer who likes both Horror and Comedy), 
+K-Means is too "strict." It forces a Hard Assignment, whereas a Gaussian Mixture Model (GMM) allows for "Soft" probabilistic assignment.
+
+3.Anisotropic Data (Elongated Clusters): If your clusters are stretched out like cigars, K-Means will mistakenly split them into two or three circular pieces because it assumes all clusters have an Identity Covariance Matrix (they are equally wide in all directions).
+
+4.Data with Extreme Scale Variance: If one feature ranges from $0$ to $1$ and another from $0$ to $1,000,000$, 
+K-Means will ignore the first feature entirely. Unless you scale your data, the results are mathematically meaningless.
+
+5.High Noise/Noisy "Bridges": If there are "strings" of noise connecting two clusters, 
+K-Means will often merge them into one giant cluster or get pulled off-center. In this case, density-based algorithms like DBSCAN are superior.
+
+
+K-Medoids (PAM)
+------------------------------------------------------------------------------------------------------------------------------
+1. Key idea
+   - Replace “centroid = mean” with medoid = an actual data point that minimizes total distance within the cluster.
+   - Objective: [ \min \sum_{i=1}^{k}\sum_{x \in C_i} d(x, m_i) ] where (m_i) is a chosen data point (medoid).
+
+2. Algorithm (typical: PAM = Partitioning Around Medoids)
+   - Pick (k) initial medoids (random/heuristic)
+   - Assign points to nearest medoid (using any distance (d))
+   - Swap step: try replacing a medoid with a non-medoid point; keep swap if it improves objective
+   - Repeat until no swap improves cost
+
+3. Data type: numeric (and can extend to other types if you can define a distance)
+
+4. Center point: actual data point (medoid)
+
+5. Distance metric: any valid dissimilarity (Manhattan, Euclidean, cosine distance, Gower, edit distance, etc.)
+
+6. Sensitivity to outliers: Low (robust)
+   - Because the representative is an existing point; outliers are unlikely to become medoids unless they truly minimize distances.
+
+7. Trade-offs
+   - More robust + flexible distances
+   - Often slower than K-means (classic PAM is ~(O(k(n-k)^2))), so for big data use:
+
+K-Modes (categorical analogue of K-means)
+------------------------------------------------------------------------------------------------------------------------------
+1. Problem it solves
+   - Mean/Euclidean don’t work for purely categorical features (e.g., {red, blue}, {yes, no})
+
+2. Distance (dissimilarity)
+   - Usually simple matching / Hamming: [ d(x,y)=\sum_{j=1}^{p} \mathbf{1}(x_j \neq y_j) ]
+
+3. Center point
+   - A “mode vector”: for each feature, pick the most frequent category in that cluster.
+
+4. Algorithm
+   - Initialize (k) mode vectors (often from random points)
+   - Assign each record to the cluster with smallest mismatch count
+   - Update mode vector feature-wise by majority vote
+   - Repeat to convergence
+
+5. Data type: categorical
+
+6. Distance metric: mismatches / Hamming (sometimes weighted per feature)
+
+7. Sensitivity to outliers: Low
+   - One rare category in one record doesn’t shift the mode much unless it becomes frequent_
+
+
+K-Prototypes (mixed numeric + categorical)
+------------------------------------------------------------------------------------------------------------------------------
+1. Why it exists
+   - Real datasets often mix:
+     - numeric (age, income)
+     - categorical (country, plan type)
+
+2. Center point
+   - Prototype = (means for numeric features) + (modes for categorical features)
+
+3. Distance metric (combined)
+   - A common form: [ d(x,proto)=\sum_{j\in Num}(x_j-\mu_j)^2 ;+; \gamma \sum_{j\in Cat}\mathbf{1}(x_j \neq mode_j) ]
+   - (\gamma) balances numeric vs categorical influence.
+
+4. Algorithm
+   - Initialize (k) prototypes
+   - Assign using the combined distance above
+   - Update numeric parts by mean; categorical parts by mode
+   - Iterate until stable
+
+5. Sensitivity to outliers: Moderate
+   - Numeric part still mean-based (outliers matter), categorical part is robust.
+   - Robust scaling / outlier handling helps a lot.
+
+All numeric + speed matters → K-means
+Numeric but need robustness / arbitrary distance → K-medoids
+All categorical → K-modes
+Mixed numeric + categorical → K-prototypes (tune (\gamma), scale numeric)
+
+Scaling
+K-means and numeric part of K-prototypes require scaling (standardization).
+Interpretability
+Medoids are very interpretable (representative real examples).
+(\gamma) in K-prototypes
+If (\gamma) too large → categoricals dominate; too small → numeric dominates.
+Often chosen by trial/validation or heuristic based on numeric variance.
