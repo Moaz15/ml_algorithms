@@ -1,0 +1,13 @@
+what is DBSCAN done 
+properties done 
+how it differs from kmeans done 
+parameters done 
+important definitions done 
+how it works done 
+distance metrics done 
+choosing a clustering strategy done 
+Choosing DBSCAN Parameters (ε and MinPts) done 
+Evaluation Metrics for DBSCAN
+DBSCAN: Key Limitations & Strategic Fixes
+Time Complexity and Space Complexity  -- not done 
+Scrath Implementation -- not done 
