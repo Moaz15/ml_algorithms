@@ -1,0 +1,48 @@
+# Dimensionality Reduction Study Roadmap
+
+## 1. Fundamentals
+- [ ] **What is Dimensionality Reduction?**
+  - Understand the concept of reducing the number of random variables under consideration.1
+- [ ] **The Curse of Dimensionality**
+  - Why high-dimensional data is problematic (sparseness, distance metric breakdown).
+- [ ] **Why Reduce Dimensions?**
+  - Visualization (reducing to 2D or 3D)
+  - Speeding up training times (computational efficiency)
+  - Noise removal (filtering out less important features)
+- [ ] **Types of Dimensionality Reduction**
+  - *Feature Selection*: Keeping a subset of the original features.
+  - *Feature Extraction*: Transforming the data into a new, smaller set of features.
+
+## 2. Linear Dimensionality Reduction
+- [ ] **Principal Component Analysis (PCA)**
+  - [ ] Mathematics: Covariance matrix computation, Eigenvectors, and Eigenvalues.
+  - [ ] Concept: Finding directions of maximum variance.
+  - [ ] Metrics: Explained Variance Ratio.
+  - [ ] Practical: Creating and interpreting a Scree Plot to choose the number of components.
+- [ ] **Linear Discriminant Analysis (LDA)**
+  - [ ] Supervised vs. Unsupervised reduction (unlike PCA, LDA uses class labels).
+  - [ ] Mathematics: Within-class scatter vs. Between-class scatter matrices.
+  - [ ] Goal: Maximizing class separability.
+- [ ] **Singular Value Decomposition (SVD)**
+  - [ ] Concept: Factorizing a matrix into singular vectors and singular values.
+  - [ ] **Truncated SVD**: Application in sparse matrices.
+  - [ ] **Latent Semantic Analysis (LSA)**: Use case of SVD in Natural Language Processing.
+
+## 3. Non-Linear Dimensionality Reduction (Manifold Learning)
+- [ ] **Manifold Hypothesis**
+  - The idea that high-dimensional data actually lies on a lower-dimensional manifold.
+- [ ] **Kernel PCA**
+  - [ ] Concept: Extending PCA to non-linear patterns using the Kernel Trick.
+  - [ ] Common Kernels: RBF (Radial Basis Function), Polynomial, Sigmoid.
+- [ ] **t-SNE (t-Distributed Stochastic Neighbor Embedding)**
+  - [ ] Goal: Preserving local structures (keeping similar instances close).
+  - [ ] Key concepts: KL Divergence, Perplexity parameter.
+  - [ ] Primary Use Case: Visualization (not suitable for feature generation/downstream models directly).
+- [ ] **UMAP (Uniform Manifold Approximation and Projection)**
+  - [ ] Goal: Preserving both local and global structures.
+  - [ ] Comparisons: Understand why/when to use UMAP over t-SNE (usually faster, preserves global distance better).
+- [ ] **Autoencoders**
+  - [ ] Architecture: Neural network with an Encoder (compressing) and a Decoder (reconstructing).
+  - [ ] Concept: Unsupervised learning to find a low-dimensional representation (bottleneck).
+- [ ] **Variational Autoencoders (VAE)**
+  - [ ] Concept: Probabilistic twist on autoencoders; learning the underlying distributions rather than exact points.

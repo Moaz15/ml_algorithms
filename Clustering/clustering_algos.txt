@@ -1,0 +1,25 @@
+Clustering fundamentals + preprocessing
+scaling/standardization, distance metrics, curse of dimensionality, train/valid mindset for unsupervised
+K-Means (+ K-means++ + MiniBatch)
+baseline, speed/scalability, inertia, failure modes
+Clustering evaluation metrics (early)
+silhouette (and noise handling), Davies–Bouldin, Calinski–Harabasz
+external metrics (ARI/NMI) when labels exist
+stability checks / reruns
+Hierarchical clustering (Agglomerative)
+linkage types (Ward/complete/average), dendrogram, interpretability
+when it beats K-means/DBSCAN
+DBSCAN
+core/border/noise, eps/MinPts, k-distance plot, limitations
+HDBSCAN / OPTICS (density at multiple scales)
+solves varying density better than DBSCAN; very common in practice for embeddings
+GMM + EM
+soft clustering, ellipsoids, model selection (AIC/BIC), when it beats K-means
+PCA (deep)
+a “must” enabler for clustering in moderate/high dimensions; whitening, explained variance, practical pipelines
+UMAP / t-SNE (light, practical usage)
+mostly for visualization + “cluster-then-DBSCAN/HDBSCAN” workflows
+learn pitfalls: t-SNE not for global distances; UMAP preserves more global structure
+Anomaly detection
+after density + GMM: Isolation Forest, One-Class SVM, LOF, plus “DBSCAN noise as anomalies”
+framing: novelty vs outlier detection, evaluation with rare labels
