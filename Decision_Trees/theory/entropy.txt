@@ -1,0 +1,55 @@
+A decision tree wants each node to be as pure as possible:
+
+Pure node: almost all samples belong to one class (e.g., all “Pass”)
+Impure node: mixed classes (e.g., Pass and Fail together)
+
+Entropy is a number that measures how impure a node is. The tree uses it to decide the best split.
+
+Entropy measures uncertainty in the class label at a node.
+If a node contains only Pass or only Fail → no uncertainty → entropy = 0
+If a node contains 50% Pass, 50% Fail → maximum uncertainty → entropy = 1 (for binary class)
+
+Examples (binary classification):
+
+Node: 4 Pass, 0 Fail → entropy = 0
+Node: 2 Pass, 2 Fail → entropy = 1
+Node: 9 Pass, 6 Fail → entropy is between 0 and 1
+
+Important:
+For 2 classes, entropy is in [0, 1]
+For more than 2 classes, max entropy can be > 1 (because log2(k))
+
+Entropy formula
+Let a node S contain k classes. Let p_i be the probability (fraction) of class i in S.
+p_i = count(class_i in S) / |S|
+Entropy: H(S) = - Σ_{i=1..k} p_i * log2(p_i)*_
+Note on log(0): If p_i = 0, treat that term as 0: 0 * log2(0) = 0 (so we simply skip p_i = 0 terms)*
+
+Example:
+Node with 4 Pass, 6 Fail
+
+p_pass = 4 / 10 = 0.4
+p_fail = 6 / 10 = 0.6
+
+Entropy = - [0.4 * log2(0.4) + 0.6 * log2(0.6)]
+= - [0.4 * (-1.32) + 0.6 * (-0.74)]
+= - [-0.528 - 0.444]
+= 0.972
+
+
+Information Gain:
+
+represents how much information a feature provides for the target variable.
+A split divides the parent node S into child nodes S1, S2, ... Sm.
+Weighted child entropy: H_children = Σ_{j=1..m} (|Sj| / |S|) * H(Sj)*_
+Information Gain: IG = H(parent) - H_children
+
+Interpretation:
+
+High IG = big reduction in impurity -> good split
+Low IG = little reduction in impurity -> bad split
+
+
+
+
+

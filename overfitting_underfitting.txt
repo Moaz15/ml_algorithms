@@ -65,7 +65,7 @@ Why High Variance?
 Fixes:
 - Use regularization (L1/L2)
 - Use a simpler model
-- Collect more data
+- Collect more data - Data Augmentation.
 - Use early stopping or dropout
 - Reduce feature count
 
@@ -162,3 +162,14 @@ Balance model complexity with data quantity and regularization.
 | Fix            | Add complexity      | Simplify, regularize |
 
 
+Note :
+------------
+Ensemble Methods (Bagging vs. Boosting)
+
+Bagging (e.g., Random Forest): 
+Primarily reduces Variance. 
+It averages multiple "overfit" trees to create a stable model.
+
+Boosting (e.g., XGBoost, Gradient Boosting): 
+Primarily reduces Bias. 
+It trains models sequentially to fix the errors of the previous model, turning "underfit" weak learners into a strong learner.

@@ -1,0 +1,136 @@
+PHASE 1: THE FOUNDATION (The "What" and "Why")
+--------------------------------------------------------------------------------
+
+1. Definition: 
+   Decision Trees are supervised learning algorithms used for both 
+   Classification and Regression tasks.
+
+2. The Anatomy of a Tree:
+   * Root Node: The top-most node representing the entire dataset.
+   * Internal Nodes: Decision points where features are tested.
+   * Leaf Nodes: Final outcome/prediction nodes (no further splitting).
+
+3. The Greedy Nature:
+   Why it’s a "Greedy Algorithm"? It makes the best local choice at each step 
+   based on the current data subset, without looking ahead to see if that choice 
+   leads to the global optimum.
+
+4. Bias-Variance Tradeoff:
+   A raw, unpruned Decision Tree typically has Low Bias but High Variance 
+   (it overfits to the training data).
+
+
+PHASE 2: THE MATHEMATICAL ENGINE (Splitting Criteria)
+--------------------------------------------------------------------------------
+This is the core logic where the tree decides "how" to separate the data.
+
+1. Entropy:
+   Measures the "disorder" or randomness in a dataset. High entropy = high 
+   impurity; Zero entropy = perfectly pure dataset.
+
+2. Information Gain (ID3 Algorithm):
+   The reduction in entropy achieved by splitting on a specific feature. 
+   Goal: Maximize Information Gain.
+
+3. Gini Impurity (CART Algorithm):
+   The default metric for Classification and Regression Trees. It measures the 
+   probability of a randomly chosen element being incorrectly labeled if it 
+   was randomly labeled according to the distribution in the subset.
+
+4. Gain Ratio (C4.5 Algorithm):
+   A modification of Information Gain that penalizes features with too many 
+   distinct values (like ID numbers), which traditionally "cheat" by 
+   artificially producing high Information Gain.
+
+5. Variance Reduction (For Regression)
+   For regression trees, the goal is to minimize variance rather than 
+   impurity. The reduction in variance achieved by a split is calculated as: 
+   Reduction = Var(Parent) - Σ (|Child| / |Parent|) * Var(Child). The split 
+   with the highest variance reduction is chosen.
+
+
+PHASE 3: CONSTRUCTION & FEATURE SELECTION
+--------------------------------------------------------------------------------
+How the tree architecturally builds itself from a table of data.
+
+1. Feature Selection:
+   The algorithm iterates through every available feature to find the one 
+   providing the highest Information Gain or lowest Gini Impurity.
+
+2. Handling Continuous Variables:
+   Unlike categorical data, thresholds must be chosen. This is done by sorting 
+   all values and testing midpoints as potential split points.
+
+3. Handling Categorical Variables:
+   Deciding between subset splits or binary splits (implications for one-hot 
+   encoding vs. label encoding).
+
+4. Feature Importance:
+   Calculated by tracking which features contribute most to reducing impurity 
+   across the entire tree, weighted by the number of samples reaching those nodes.
+
+
+PHASE 4: REGULARIZATION (Stopping the Overfitting)
+--------------------------------------------------------------------------------
+A tree will grow until every leaf is "pure" unless constrained.
+
+1. The Overfitting Problem:
+   Why a fully grown tree "memorizes noise" instead of learning patterns.
+
+2. Pre-Pruning (Early Stopping):
+   * max_depth: Limiting the maximum depth of the tree.
+   * min_samples_split: Minimum samples required to attempt a split.
+   * min_samples_leaf: Minimum samples allowed in a final leaf node.
+   * max_features: Restricting the number of features considered for each split.
+
+3. Post-Pruning (Cost Complexity Pruning):
+   Growing the full tree and then "cutting back" branches that add little 
+   predictive power, typically validated against a cost-complexity parameter (alpha).
+
+4. Handling Class Imbalance
+
+PHASE 5: THE BRIDGE TO ENSEMBLES & ADVANCED TOPICS
+--------------------------------------------------------------------------------
+Understanding the limitations and the transition to more powerful models.
+
+1. The "Why" of Ensembles:
+   * Bagging (Random Forest): Many deep, high-variance trees averaged to reduce error.
+   * Boosting (XGBoost/GBM): Many shallow, high-bias trees corrected sequentially.
+
+2. Regression Trees:
+   Moving beyond classification. Uses Mean Squared Error (MSE) or Mean Absolute 
+   Error (MAE) as the splitting criterion instead of Gini/Entropy.
+
+3. Handling Missing Values:
+   Note that standard Scikit-Learn trees require data imputation, while advanced 
+   implementations (XGBoost/LightGBM) handle nulls automatically.
+
+4. Data Sensitivity:
+   * Instability: Small changes in training data can lead to a completely different tree.
+   * Axis-Alignment: Trees create "step-wise" boundaries, which struggle with 
+     diagonal relationships in data.
+
+
+
+The Computational Complexity
+
+Training Complexity: For a dataset with $n$ samples and $m$ features, the time complexity to build a balanced tree is roughly $\mathcal{O}(m \cdot n \log n)$.
+
+Prediction Complexity: Querying a tree to make a prediction is incredibly fast, scaling at $\mathcal{O}(\text{depth})$, which is roughly $\mathcal{O}(\log n)$ for a balanced tree.
+
+
+
+
+
+CART methodology consists of tree parts:
+
+Construction of maximum tree
+
+Choice of the right tree size
+
+Classification of new data using constructed tree
+
+The feature at the top of the tree structure is the most important variable. 
+Missing or outliers do not have much effect on the reliability of results in tree methods. Likewise, scaling operations do not have an effect on the result.
+
+

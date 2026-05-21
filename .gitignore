@@ -1,5 +1,6 @@
 .env
 
 ML_Algo/venv/.venv/
+ML_Algo/
 
 __pycache__/*.pyc

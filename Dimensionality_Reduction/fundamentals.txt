@@ -25,7 +25,7 @@
 - You lost one dimension but kept most of the meaningful structure.
 - Dimensionality Reduction is finding the best "shadow" of your data.
 
----
+----------------------------------------------------------------------------------------------------------------------------------
 
 # 2. The Curse of Dimensionality
 
@@ -87,13 +87,14 @@
 - Leads to better generalization of downstream models (less overfitting).
 - *Example:* Sensor data with 200 channels — only 10 capture true signal, rest is measurement noise.
 
-### 3.4 Avoiding the Curse of Dimensionality (Bonus — often asked)
+### 3.4 Avoiding the Curse of Dimensionality 
 - Directly addresses the sparsity and distance breakdown issues above.
 - Makes distance-based algorithms (KNN, K-Means, DBSCAN) work reliably again.
 - Ensures enough data density in the reduced space.
 
-### 3.5 Multicollinearity Removal (Bonus)
+### 3.5 Multicollinearity Removal 
 - Many real-world features are correlated with each other.
 - *Example:* Height in cm and height in inches — perfectly correlated, redundant.
 - PCA creates components that are orthogonal (uncorrelated) by design.
 - Helps linear models that assume feature independence.
+

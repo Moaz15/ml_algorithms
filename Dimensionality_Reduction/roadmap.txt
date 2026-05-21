@@ -13,6 +13,7 @@
   - *Feature Selection*: Keeping a subset of the original features.
   - *Feature Extraction*: Transforming the data into a new, smaller set of features.
 
+
 ## 2. Linear Dimensionality Reduction
 - [ ] **Principal Component Analysis (PCA)**
   - [ ] Mathematics: Covariance matrix computation, Eigenvectors, and Eigenvalues.
@@ -27,6 +28,7 @@
   - [ ] Concept: Factorizing a matrix into singular vectors and singular values.
   - [ ] **Truncated SVD**: Application in sparse matrices.
   - [ ] **Latent Semantic Analysis (LSA)**: Use case of SVD in Natural Language Processing.
+
 
 ## 3. Non-Linear Dimensionality Reduction (Manifold Learning)
 - [ ] **Manifold Hypothesis**
@@ -46,3 +48,7 @@
   - [ ] Concept: Unsupervised learning to find a low-dimensional representation (bottleneck).
 - [ ] **Variational Autoencoders (VAE)**
   - [ ] Concept: Probabilistic twist on autoencoders; learning the underlying distributions rather than exact points.
+
+
+
+
