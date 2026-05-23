@@ -1,0 +1,169 @@
+Bagging (Bootstrap Aggregating)
+--------------------------------------------------------------------------------
+1) What Bagging is
+------------------
+Bagging = an ensemble method that trains many models on different random versions
+of the training set, then combines their predictions.
+
+Full form: BOOTSTRAP AGGregatING.
+Used for:
+- Classification: combine by majority vote / average probabilities
+- Regression: combine by averaging predictions
+
+2) Why Bagging works (core intuition)
+-------------------------------------
+Many models (especially decision trees) are "high variance":
+- small change in training data -> very different model
+- leads to overfitting / unstable predictions
+
+Bagging reduces variance by averaging many noisy models:
+- each model makes slightly different mistakes
+- averaging cancels out random errors
+- prediction becomes more stable
+
+Important: bagging mainly reduces VARIANCE, not BIAS.
+So it helps most with flexible models that overfit.
+
+
+3) Bootstrap sampling (the "B" in bagging)
+------------------------------------------
+To train each model, you sample a new training set of the same size N by
+sampling WITH replacement from the original N rows.
+
+Facts you should know:
+- A bootstrap sample contains duplicates.
+- On average, about 63.2% of unique training rows appear in a bootstrap sample.
+- The remaining ~36.8% are not used for that model (these are "out-of-bag" for that model).
+
+Example:
+Original rows: [1,2,3,4,5]
+Bootstrap draw: [2,2,5,1,4]
+Row 3 not included -> out-of-bag for that model.
+
+
+4) Base learner (what model we bag)
+-----------------------------------
+Bagging is a meta-technique: you can bag many types of models.
+
+Common base learners:
+- Decision trees (most common)
+- In theory: k-NN, linear models, SVM, etc. (less common)
+
+Best base learners for bagging:
+- high-variance models (trees, deep trees)
+
+
+5) Training procedure (step-by-step)
+------------------------------------
+Given training data D of size N, and number of estimators B:
+
+For b = 1..B:
+  1) Draw bootstrap dataset D_b by sampling N rows from D with replacement
+  2) Train base model h_b on D_b
+
+You end up with models: h_1, h_2, ..., h_B
+
+
+6) Aggregation (the "A" in bagging)
+-----------------------------------
+After training many models, combine predictions:
+
+Regression:
+  y_hat(x) = (1/B) * Σ_{b=1..B} h_b(x)
+
+Classification (hard voting):
+  y_hat(x) = mode{ h_b(x) }
+
+Classification (soft voting, preferred when available):
+  p_hat(class=k | x) = (1/B) * Σ_{b=1..B} p_b(k | x)
+  predict class with highest averaged probability
+
+
+7) Out-of-Bag (OOB) evaluation (built-in validation)
+----------------------------------------------------
+Because each bootstrap sample leaves out ~36.8% of rows, we can evaluate without
+a separate validation set:
+
+For each training row i:
+- collect predictions from models where row i was OOB (not used in training that model)
+- aggregate those predictions -> OOB prediction for row i
+
+Then compute metric on these OOB predictions -> OOB score.
+
+Why it matters:
+- quick estimate of generalization performance
+- helps tune hyperparameters without extra split (still, a real test set is best)
+
+
+8) Key hyperparameters in bagging
+---------------------------------
+- n_estimators (B): number of models
+  More -> better (up to diminishing returns) but slower.
+
+- max_samples: size of bootstrap sample
+  Usually N (same as dataset size), but can be smaller.
+
+- bootstrap: whether sampling is with replacement (classic bagging = True)
+
+- base_estimator complexity:
+  For trees: max_depth, min_samples_leaf, etc.
+  Deep trees + bagging is common.
+
+- random_state: controls reproducibility
+
+- n_jobs: parallelism (bagging trains models independently -> easy to parallelize)
+
+
+9) Bagging vs Random Forest (common interview confusion)
+--------------------------------------------------------
+Bagging with trees:
+- randomness comes from row bootstrapping only
+
+Random Forest:
+- bagging + extra randomness by selecting a random subset of features at each split
+  (max_features)
+This extra feature randomness reduces correlation between trees -> improves ensemble.
+
+
+10) When bagging helps / when it doesn’t
+----------------------------------------
+Bagging helps when:
+- base model is high variance (deep decision tree)
+- dataset has noise and you want stability
+- you want a strong baseline on tabular data
+
+Bagging helps less when:
+- base model is high bias (e.g., linear model underfitting)
+  Averaging many underfit models still underfits.
+
+Also note:
+- bagging does NOT fix data leakage
+- bagging does NOT automatically handle class imbalance (you may need class weights / resampling)
+
+
+11) Pros and cons (practical)
+-----------------------------
+Pros:
+- strong variance reduction -> more robust than a single tree
+- parallelizable training
+- often good accuracy with minimal tuning
+- OOB score available (for tree bagging / random forest)
+
+Cons:
+- less interpretable than a single tree
+- larger memory / slower inference than one model
+- feature importance can be tricky (use permutation importance/SHAP)
+- for best accuracy on tabular data, boosting often wins (XGBoost/LightGBM/CatBoost)
+
+
+12) Common bagging variants (know the names)
+--------------------------------------------
+- Pasting: sample without replacement (instead of bootstrap)
+- Subbagging: bootstrap sample smaller than N
+- Random subspace: sample features instead of rows
+- Random patches: sample rows + features
+
+In practice, you’ll mostly see:
+- Random Forest (rows + feature subsampling at splits)
+- Extra Trees (more random splits)
+- BaggingClassifier/Regressor (generic bagging wrapper)

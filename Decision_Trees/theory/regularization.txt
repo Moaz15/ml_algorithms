@@ -131,7 +131,7 @@ Scenario E: You have a dataset with a very high number of columns/features.
 | min_samples_leaf       | Increase value       | Smooths noise & outliers.    |
 | max_features           | Decrease value       | Forces feature diversity.    |
 | min_impurity_decrease  | Increase value       | Only allows meaningful splits|
-| ccp_alpha (Post-Pruning| Increase value       | Best mathematical accuracy.  |
+| ccp_alpha (Post-Pruning)| Increase value       | Best mathematical accuracy.  |
 
 
 6. ADVANCED REGULARIZATION: ENSEMBLE METHODS
@@ -149,3 +149,78 @@ B. BOOSTING (e.g., Gradient Boosting, XGBoost, LightGBM)
    * Advantage: Trains shallow, high-bias trees sequentially. Modern boosting 
      frameworks combine structural pre-pruning with direct L1/L2 penalties on 
      leaf weights for ultimate regularization control.
+
+
+
+Cost-Complexity Pruning (Post-Pruning) in Decision Trees
+
+What problem it solves
+A fully grown decision tree can overfit:
+
+it keeps splitting until leaves are almost pure
+it may learn noise (patterns that don’t generalize)
+
+Cost-complexity pruning fixes this by:
+
+first growing a large tree
+then cutting back branches that don’t help enough
+
+Key idea
+Keep a subtree only if the accuracy improvement is worth the extra complexity.
+
+So we trade off:
+
+Good fit to training data vs
+Simplicity (smaller tree)
+
+The objective function
+
+We define a score for any tree T:
+R_alpha(T) = R(T) + alpha * |T|*
+
+Where:
+R(T) = training error (or impurity) of the tree
+classification: often based on Gini/Entropy-related impurity
+regression: based on MSE/MAE-like error
+
+|T| = number of terminal nodes (number of leaves)
+alpha >= 0 = complexity penalty
+
+Meaning:
+alpha = 0 -> no penalty -> keep the full big tree
+larger alpha -> stronger penalty -> prune more -> smaller tree
+
+How pruning happens (mechanics)
+Train a large tree (usually with very weak stopping rules).
+Consider pruning a subtree (replacing it by a single leaf).
+If replacing that subtree increases error only a little, but reduces complexity, pruning is beneficial for some alpha.
+
+
+This produces a sequence of trees:
+T0 (full tree) -> T1 -> T2 -> ... -> Tk (very small tree / stump)
+Each step prunes the "least useful" branch.
+
+How alpha is chosen in practice (most important part)
+We don’t pick alpha from training data alone. We choose alpha using validation or cross-validation:
+
+Procedure:
+
+Get candidate alphas (scikit-learn can provide ccp_alphas)
+For each alpha:
+train/prune tree with that alpha
+evaluate on validation/CV (accuracy/AUC/F1 or RMSE etc.)
+pick alpha that gives best validation performance
+final model = tree pruned with chosen alpha
+So: alpha is a hyperparameter tuned like max_depth.
+
+Use it when:
+you want a simpler, more generalizable single tree
+you want interpretability (smaller tree = easier to explain)
+pre-pruning params (max_depth, min_samples_leaf) are not enough or you prefer post-pruning
+
+
+
+
+
+
+

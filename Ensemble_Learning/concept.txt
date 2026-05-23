@@ -1,0 +1,200 @@
+ENSEMBLE LEARNING: FOUNDATIONS
+
+0) What is an Ensemble?
+-----------------------
+An ensemble is a model that combines predictions from multiple base models
+("base learners") to produce a final prediction.
+
+Common goal:
+- Better generalization (better performance on new/unseen data)
+- More stability (less sensitive to noise and small data changes)
+
+Typical ensemble recipe:
+1) Train multiple models that are not identical (diverse).
+2) Combine (aggregate) their predictions.
+
+
+1) Why Ensembles Work (Intuition)
+---------------------------------
+A single model can make errors due to:
+- sampling noise in training data
+- limited model capacity
+- getting stuck in a suboptimal solution
+- overfitting
+
+If we train many models and their errors are not perfectly aligned, combining them
+can cancel out some errors.
+
+Key requirement:
+- The models must make different mistakes (diversity).
+If all models make the same mistakes, ensembling does not help.
+
+
+2) "Wisdom of Crowds"
+------------------------------------------------------------------
+Think of each model as a "voter" predicting a class label.
+
+If:
+- each model is slightly better than random (accuracy > 50% in binary case)
+- model errors are not perfectly correlated
+then majority voting usually improves accuracy.
+
+Example:
+- 1 classifier with 60% accuracy is okay.
+- 101 independent-ish classifiers with 60% accuracy each can be much better
+  after majority vote (because wrong votes get outvoted often).
+
+Important caveat:
+In ML, models are rarely truly independent, so the benefit depends on diversity.
+
+
+3) Bias–Variance Tradeoff
+-----------------------------------------
+Prediction error can be thought of as coming from:
+- Bias: model is too simple -> underfits
+- Variance: model is too sensitive to data -> overfits
+- Noise: unavoidable randomness in data
+
+Ensembles help mainly by managing bias/variance depending on the method.
+
+3.1 Bagging reduces variance (most)
+-----------------------------------
+Bagging = train many models independently on different random versions of the data
+(e.g., bootstrap samples), then average/vote.
+
+Effect:
+- Reduces variance strongly (stabilizes the model)
+- Bias stays similar to the base learner (often)
+
+Practical example:
+- A deep decision tree overfits (high variance).
+- Bagging many trees (Random Forest) averages away instability -> better generalization.
+
+Rule of thumb:
+- Bagging helps most when the base model is high variance (deep trees).
+
+3.2 Boosting reduces bias (often) (but can also reduce variance)
+---------------------------------------------------------------
+Boosting = train models sequentially; each new model tries to correct previous errors.
+
+Effect:
+- Often reduces bias by building a stronger learner from many weak learners
+- Can overfit if pushed too far, so regularization matters (learning rate, depth, etc.)
+
+Practical example:
+- A shallow tree (stump) is too weak alone (high bias).
+- Boosting adds many stumps -> captures complex patterns -> much higher accuracy.
+
+
+4) Diversity (Why base models must be different)
+------------------------------------------------
+"Diversity" means base models produce different predictions / different errors.
+This is critical. Without diversity, averaging/voting gives little improvement.
+
+4.1 Why correlation matters (simple)
+------------------------------------
+If all base models are highly correlated (they behave similarly), then:
+- their errors are also similar
+- ensemble does not reduce variance much
+
+Best case:
+- models are accurate AND make different errors.
+
+4.2 How we create diversity in practice
+---------------------------------------
+A) Data randomness (rows):
+- bootstrap samples (bagging)
+- subsampling rows
+
+B) Feature randomness (columns):
+- random subset of features per split (Random Forest)
+- random subspace method (train each model with different feature subsets)
+
+C) Model randomness:
+- different random seeds / initializations
+- different hyperparameters
+- different model types (stacking)
+
+D) Training process randomness:
+- stochastic optimization (in neural nets)
+- random splits in Extra Trees
+
+4.3 Diversity measures (what they try to quantify)
+--------------------------------------------------
+(You don't need all formulas, just the idea.)
+- Disagreement: how often models predict different labels
+- Correlation of predictions: lower correlation is better for ensembles
+- Q-statistic: another way to measure agreement/disagreement
+
+Practical note:
+You can often "feel" low diversity when models have almost identical predictions.
+
+
+5) Aggregation (How predictions are combined)
+---------------------------------------------
+Aggregation is how we turn many model outputs into one output.
+
+5.1 Classification aggregation
+------------------------------
+A) Hard voting (majority vote):
+- Each model outputs a class label.
+- Final class = most common predicted label.
+
+When useful:
+- simple, works even if models don't output probabilities
+
+B) Soft voting (average probabilities) (usually preferred):
+- Each model outputs class probabilities (e.g., P(Yes)).
+- Average probabilities across models.
+- Final class = argmax of averaged probability.
+
+Why soft voting is better:
+- uses confidence information
+- usually smoother and more accurate than hard vote
+
+Weighted voting:
+- Give more weight to better models (e.g., weight by validation AUC).
+
+5.2 Regression aggregation
+--------------------------
+Averaging:
+- prediction = mean of base model predictions
+
+Median (robust alternative):
+- sometimes used to reduce effect of outlier models
+
+Weighted averaging:
+- more weight to models with lower validation error
+
+
+6) Probability Calibration (important in production)
+----------------------------------------------------
+Many ensembles output probabilities, but "probability quality" matters.
+
+A model can be accurate but poorly calibrated:
+- It predicts 0.90 probability, but events happen only 0.70 of the time at that score.
+
+Calibration means:
+Among samples predicted with probability p, about p fraction should be positive.
+
+Why it matters:
+- decision thresholds (approve/deny)
+- cost-sensitive decisions (fraud, medical, credit risk)
+- ranking by probability
+
+Common calibration methods:
+- Platt scaling (logistic regression on scores)
+- Isotonic regression (non-parametric calibration)
+
+Practical note:
+Some models (e.g., certain boosting settings) may need calibration.
+Random Forest probabilities can also be miscalibrated depending on setup.
+
+
+7) Quick practical checklist
+----------------------------
+- If single trees overfit: try Bagging / Random Forest.
+- If you need best tabular performance: try Gradient Boosting (XGBoost/LightGBM/CatBoost).
+- Always evaluate on validation/test data (avoid leakage).
+- For classification probabilities: check calibration if probabilities will be used for decisions.
+- Ensure diversity; ensembling identical models trained identically adds little value.
