@@ -4,6 +4,7 @@ Bagging (Bootstrap Aggregating)
 ------------------
 Bagging = an ensemble method that trains many models on different random versions
 of the training set, then combines their predictions.
+Bagging trains many models, and we want each model to see a slightly different dataset so they don’t all learn the exact same thing.
 
 Full form: BOOTSTRAP AGGregatING.
 Used for:
@@ -114,16 +115,28 @@ Why it matters:
 - n_jobs: parallelism (bagging trains models independently -> easy to parallelize)
 
 
-9) Bagging vs Random Forest (common interview confusion)
+9) Bagging vs Random Forest 
 --------------------------------------------------------
-Bagging with trees:
-- randomness comes from row bootstrapping only
+Bagging (with Trees)
+Source of Randomness: 
+Randomness comes strictly from row bootstrapping (sampling rows with replacement). 
+Each tree sees a different subset of the data, but has access to all features at every split.
 
-Random Forest:
-- bagging + extra randomness by selecting a random subset of features at each split
-  (max_features)
-This extra feature randomness reduces correlation between trees -> improves ensemble.
+Tree Correlation: 
+High. If there are a few dominant, highly predictive features in the dataset, most trees will choose those same features for their top splits, resulting in structurally similar (correlated) trees.
 
+When to Use: 
+Best when you want to reduce the variance of complex, overfitted models without altering how the underlying algorithm looks at features.
+--------------------------
+Random Forest
+Source of Randomness: 
+Bagging + Feature Subsampling. It applies row bootstrapping and introduces extra randomness by selecting a random subset of features at each node split (max_features).
+
+Tree Correlation: 
+Low. By forcing trees to ignore dominant features at certain splits, it drastically reduces correlation between trees, which decorrelates their errors and creates a more robust ensemble.
+
+When to Use: 
+Generally outperforms standard bagging on tabular data, especially when the dataset has many features or high feature redundancy.
 
 10) When bagging helps / when it doesn’t
 ----------------------------------------
@@ -167,3 +180,7 @@ In practice, you’ll mostly see:
 - Random Forest (rows + feature subsampling at splits)
 - Extra Trees (more random splits)
 - BaggingClassifier/Regressor (generic bagging wrapper)
+
+
+
+Balanced BaggingClassifier

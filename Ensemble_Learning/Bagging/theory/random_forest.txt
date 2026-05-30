@@ -1,0 +1,164 @@
+Random Forest:
+==============================================================
+
+1) Core concept
+---------------------------
+- What Random Forest is:
+  - An ensemble of decision trees
+  - Trained with bagging (bootstrap samples of rows)
+  - Uses random feature selection at each split (max_features)
+  
+- Why it works:
+  - Reduces variance of deep trees by averaging
+  - Feature randomness reduces correlation between trees
+
+2) Prediction mechanism
+-----------------------
+- Classification:
+  - Hard voting (majority class) OR soft voting (average predicted probabilities)
+- Regression:
+  - Average of tree predictions
+- Class probabilities:
+  - How probabilities are formed (fraction of samples/classes in leaf, then averaged)
+
+3) Bootstrapping + Out-of-Bag (OOB)
+-----------------------------------
+- Bootstrap sampling (with replacement)
+- Expected unique samples per bootstrap (~63.2%)
+- Out-of-bag samples (~36.8%)
+- OOB score:
+  - how it’s computed
+  - when it’s reliable
+  - OOB for model selection / quick validation
+
+4) Randomness & de-correlation
+------------------------------
+- Sources of randomness:
+  - rows (bootstrap)
+  - columns (feature subsampling at each split)
+  - tie-breaking / split randomness (implementation-dependent)
+- Why de-correlation matters:
+  - variance reduction improves when trees are less correlated
+
+5) Splitting criteria inside trees
+----------------------------------
+- For classification:
+  - Gini impurity (default)
+  - Entropy / log loss (depending on library)
+- For regression:
+  - MSE / variance reduction
+  - MAE (sometimes)
+- How splits are selected (greedy)
+
+6) Important hyperparameters 
+------------------------------------------------------------
+Forest-level:
+- n_estimators: number of trees
+- bootstrap: True/False (bagging on/off)
+- oob_score: True/False (if bootstrap True)
+- n_jobs: parallelism
+- random_state: reproducibility
+- warm_start: add more trees later (sometimes used)
+
+Tree complexity (controls overfitting):
+- max_depth
+- min_samples_split
+- min_samples_leaf
+- min_impurity_decrease
+
+Feature randomness:
+- max_features:
+  - classification common default: sqrt(num_features)
+  - regression common default: num_features (or 1/3 in some traditions)
+  - practical impact: smaller max_features => more diversity, possibly higher bias
+
+Leaf output constraints:
+- max_leaf_nodes
+
+7) Bias–variance behavior 
+----------------------------------------------
+- Single deep tree: low bias, high variance
+- Random Forest: lower variance, similar or slightly higher bias
+- As n_estimators increases:
+  - variance decreases then plateaus
+  - overfitting risk usually doesn’t increase much just by adding trees (more about tree depth)
+
+8) Handling feature types + preprocessing
+-----------------------------------------
+- Numeric features: no scaling needed
+- Categorical features:
+  - sklearn RF needs encoding (one-hot is safest)
+  - label encoding can cause awkward splits sometimes
+- Missing values:
+  - sklearn RF usually needs imputation
+  - some other libs handle missing differently
+
+9) Class imbalance
+----------------------------------------------
+- Use class_weight="balanced" (sklearn)
+- Use sampling strategies (undersample/oversample)
+- Choose right metrics:
+  - ROC-AUC, PR-AUC, F1, recall@precision, etc.
+- Threshold tuning (don’t default to 0.5 blindly)
+
+10) Feature importance & interpretability
+-----------------------------------------
+- Impurity-based importance (MDI):
+  - fast but biased (high cardinality, correlated features)
+- Permutation importance (more reliable)
+- SHAP (TreeSHAP works best for boosted trees; for RF can still be used)
+- Decision path / rule extraction:
+  - explain single prediction by listing split rules in the tree(s)
+- Partial dependence / ICE:
+  - effect of feature on prediction (global/local patterns)
+
+11) Strengths (where RF is a great choice)
+------------------------------------------
+- Strong baseline on tabular data
+- Works well with nonlinear relationships and interactions
+- Robust to outliers and monotonic transforms
+- Minimal preprocessing
+- Parallel training/inference (trees independent)
+
+12) Weaknesses / limitations (must know)
+----------------------------------------
+- Not best-in-class accuracy vs gradient boosting on many tabular problems
+- Large memory footprint for many deep trees
+- Slower inference than linear models (many trees)
+- Probability calibration can be imperfect
+- Feature importance pitfalls (bias, correlation)
+- Doesn’t extrapolate well in regression (predictions tend to be within range of training targets)
+
+13) Comparison to close relatives
+---------------------------------
+- Bagging vs Random Forest:
+  - RF = bagging + feature subsampling at splits
+- Extra Trees vs Random Forest:
+  - Extra Trees uses more random splits (random thresholds), often faster, similar accuracy
+- Gradient Boosting vs Random Forest:
+  - boosting often higher accuracy, more sensitive to tuning
+  - RF often simpler, more robust baseline
+
+14) Practical training workflow (what to actually do)
+-----------------------------------------------------
+- Start with:
+  - RandomForestClassifier/Regressor baseline
+  - use cross-validation (or OOB for quick check)
+- Tune in this rough order:
+  1) n_estimators (enough trees for stability)
+  2) max_depth / min_samples_leaf (control overfitting)
+  3) max_features (diversity vs strength)
+- Validate:
+  - check calibration if probabilities are used
+  - compute permutation importance for trustworthy interpretation
+
+15) Production considerations
+-----------------------------
+- Model size and latency:
+  - constrain tree depth, number of trees
+- Reproducibility:
+  - set random_state, record training data version
+- Monitoring:
+  - data drift, performance drift
+- Fairness / compliance:
+  - interpretability tools and feature reviews
