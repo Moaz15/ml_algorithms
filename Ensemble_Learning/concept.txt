@@ -29,7 +29,6 @@ Key requirement:
 - The models must make different mistakes (diversity).
 If all models make the same mistakes, ensembling does not help.
 
-
 2) "Wisdom of Crowds"
 ------------------------------------------------------------------
 Think of each model as a "voter" predicting a class label.
@@ -198,3 +197,11 @@ Random Forest probabilities can also be miscalibrated depending on setup.
 - Always evaluate on validation/test data (avoid leakage).
 - For classification probabilities: check calibration if probabilities will be used for decisions.
 - Ensure diversity; ensembling identical models trained identically adds little value.
+
+
+
+Types:
+1. Voting Ensemble
+2. Bagging (Bootstrap Aggregating)
+3. Boosting
+4. Stacking
