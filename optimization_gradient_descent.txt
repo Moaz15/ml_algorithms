@@ -25,7 +25,7 @@ Where:
 - α: learning rate (step size)
 - ∇J(θ): gradient of the cost function with respect to θ
 
----------------------------
+
 Types of Gradient Descent:
 ---------------------------
 
@@ -145,3 +145,10 @@ Summary Table:
 
 
 
+
+### Important Questions to practice : 
+
+1. Why do we move in the direction of the negative gradient? Prove mathematically that it guarantees a local decrease in the loss function.
+2. Explain the relationship between the learning rate and the Hessian matrix ($H$) of the loss function. What happens if the learning rate $\alpha > 2/\lambda_{max}$ (where $\lambda_{max}$ is the largest eigenvalue of the Hessian)
+3. How do you scale Mini-Batch Gradient Descent to billions of parameters across hundreds of GPUs? Explain Data Parallelism vs. Model Parallelism.
+4. If we scale our batch size from 256 to 32,768 to utilize a massive cluster, what happens to the gradient updates, and how do we adjust the learning rate?
