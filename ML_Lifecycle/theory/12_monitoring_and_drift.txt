@@ -1,0 +1,164 @@
+STAGE 9a: MONITORING, DATA DRIFT AND CONCEPT DRIFT
+================================================================================
+
+A deployed model is a decaying asset. It was fitted to a snapshot of a world
+that keeps moving. Monitoring is how you find out before your users do.
+
+--------------------------------------------------------------------------------
+1. THE FOUR LAYERS OF MONITORING
+--------------------------------------------------------------------------------
+
+    Layer 1  Infrastructure   uptime, latency p50/p95/p99, throughput, error
+                              rate, CPU/GPU/memory, queue depth, cost.
+                              Standard SRE. Alert on these first - most
+                              "model problems" are outages.
+    Layer 2  Data quality     schema conformance, null rates, cardinality,
+                              range violations, freshness/staleness of each
+                              feature, row counts per batch.
+                              THIS catches the majority of real incidents. An
+                              upstream job that fails silently and serves stale
+                              or null features is far more common than genuine
+                              concept drift.
+    Layer 3  Distributions    input feature drift, prediction drift, and (when
+                              labels arrive) label drift.
+    Layer 4  Model quality    the actual metric against ground truth, per slice,
+                              plus the business KPI.
+
+Monitor from the outside in: Layer 4 is what you care about, Layers 1-3 are what
+you can observe immediately. Layer 4 is delayed by label maturation - sometimes
+by months - which is exactly why Layers 2 and 3 exist.
+
+--------------------------------------------------------------------------------
+2. THE DRIFT TAXONOMY
+--------------------------------------------------------------------------------
+
+Write P(X, y) = P(y | X) P(X).
+
+    Data / covariate drift    P(X) changes, P(y | X) unchanged.
+        A new marketing channel brings younger users. The learned relationship
+        still holds, but the model is now operating in a region it saw rarely.
+        Effect: often modest degradation; sometimes none.
+    Concept drift             P(y | X) changes.
+        The same inputs now imply a different outcome: fraudsters change tactics,
+        a price change alters purchase behaviour, a pandemic rewrites travel
+        demand. This is the dangerous one - the model is now WRONG, not merely
+        extrapolating.
+    Label / prior drift       P(y) changes.
+        The base rate moves (fraud rate doubles). Breaks calibration and any
+        cost-derived threshold even if the conditional is stable.
+    Upstream data change      not "drift" in the statistical sense at all - a
+        schema change, a unit change, a logging bug, a currency switch. Shows up
+        identically in drift monitors. Always rule this out FIRST; it is the most
+        frequent cause and the fix is an upstream fix, not a retrain.
+
+Speed shapes the response:
+    sudden      an incident; roll back or retrain immediately
+    gradual     scheduled retraining handles it
+    incremental slow trend; watch and refresh periodically
+    recurring/  seasonal - do NOT retrain reactively; encode seasonality as
+    cyclical    features and keep a full cycle in the training window
+
+--------------------------------------------------------------------------------
+3. DETECTING DATA DRIFT
+--------------------------------------------------------------------------------
+
+Compare a reference window (training data, or a known-good production period)
+against a current window, per feature.
+
+    Population Stability Index (PSI)
+        PSI = sum_bins (curr% - ref%) * ln(curr% / ref%)
+        Industry convention: < 0.1 stable, 0.1-0.25 moderate shift, > 0.25
+        significant. It is a symmetric, binned KL-like divergence. Widely used
+        in credit risk; the thresholds are conventions, not theory, and they
+        depend on the bin count (10 bins is standard).
+    Kolmogorov-Smirnov test
+        max distance between empirical CDFs; continuous features, two-sample.
+    Chi-square test
+        categorical features, binned counts.
+    Jensen-Shannon divergence / Wasserstein distance
+        JS is bounded and symmetric; Wasserstein (earth mover's) respects the
+        ordering of values and is more meaningful for numeric features than a
+        binned divergence.
+    Domain classifier ("adversarial validation")
+        Train a classifier to distinguish reference rows from current rows. If
+        its AUC is near 0.5, the distributions are indistinguishable. If it is
+        high, look at ITS feature importances - they name exactly which features
+        drifted. Catches multivariate drift (the marginals can each be
+        unchanged while the joint has shifted), which per-feature tests miss.
+        Best single tool here.
+    Embedding drift
+        For text/images, monitor distances between embedding distributions
+        (MMD, cosine to reference centroids).
+
+The statistical-significance trap: with millions of rows, every KS test is
+significant and every alert fires. Monitor EFFECT SIZE (PSI, Wasserstein, JS)
+rather than p-values, and set thresholds empirically by backtesting: replay
+historical windows, see what the metric did in periods you know were fine, and
+set the alarm above that noise band.
+
+Also: multiple testing across 500 features guarantees false alarms. Rank
+features by importance and alert only on drift in features the model actually
+relies on (importance-weighted drift), and always attach the observed
+performance impact where you can.
+
+--------------------------------------------------------------------------------
+4. DETECTING CONCEPT DRIFT
+--------------------------------------------------------------------------------
+
+Hard, because it requires labels.
+
+    With labels (delayed)
+        Track the metric on a rolling window against a control baseline. Use
+        sequential change detectors designed for streams: DDM/EDDM (monitor the
+        error rate and its standard deviation, warn then alarm), ADWIN (adaptive
+        windowing; splits the window and compares means), Page-Hinkley (CUSUM on
+        the error). These are the textbook answers.
+    Without labels (proxies)
+        - prediction distribution drift: the score histogram shifting is an early
+          warning and is available immediately
+        - confidence collapse: rising entropy / more predictions near the
+          decision boundary
+        - calibration decay measured on whatever labels do arrive
+        - agreement with a cheap, always-available reference model or heuristic
+        - OOD detection scores on the inputs
+        None of these prove concept drift; they tell you to look.
+    Partial labels
+        Deliberately buy ground truth: sample a small random slice for human
+        review every day. A few hundred labels a day gives a usable, unbiased
+        monitoring signal long before natural labels mature. Budget for this at
+        design time.
+
+Remember the feedback loop from 01_problem_framing.txt: if the model's actions
+change who gets labelled, your monitored metric is biased. The random holdout
+control group is what keeps monitoring honest.
+
+--------------------------------------------------------------------------------
+5. ALERTING THAT PEOPLE DO NOT MUTE
+--------------------------------------------------------------------------------
+
+    - Alert on user impact and on things a human can act on. Page for "feature
+      pipeline stale > 6h" and "p99 latency > SLO"; email a weekly digest for
+      "PSI on feature X is 0.14".
+    - Every alert needs a runbook entry: what it means, how to confirm, what to
+      do, who owns it.
+    - Include the drift dashboard link and the offending feature in the alert.
+    - Track alert precision. An alerting system with 5% precision is worse than
+      none, because it trains the team to ignore it.
+    - Tiered severity: informational (log), warning (ticket), critical (page and
+      consider automatic rollback or fallback to the previous model/heuristic).
+
+--------------------------------------------------------------------------------
+6. WHAT TO LOG, PERMANENTLY
+--------------------------------------------------------------------------------
+
+Per prediction: request id, entity id, timestamp, model name + version, the
+feature vector actually used (or a reference to it), the raw score, the applied
+threshold, the final decision, and later the observed outcome joined back by id.
+
+With that table you can: recompute any metric retrospectively, build training
+data free of training/serving skew, run counterfactual analyses, debug a single
+customer complaint, and satisfy an audit. Without it, every question about
+production becomes unanswerable.
+
+Sample if volume is prohibitive, but sample in a documented, unbiased way, and
+always retain 100% of the rows that triggered an action.

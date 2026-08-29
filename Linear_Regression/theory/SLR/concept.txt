@@ -1,0 +1,126 @@
+SIMPLE LINEAR REGRESSION — CONCEPT & INTUITION
+==============================================
+
+1. THE PICTURE
+--------------------------------------------------------------------------------
+One feature x, one continuous target y, n points on a scatter plot. Draw the line
+that sits best among them:
+
+    ŷ = m·x + c
+
+"Best" means smallest total squared VERTICAL gap to the points. Everything else
+is bookkeeping on that one sentence.
+
+The line estimates the conditional mean: for a given x it predicts the AVERAGE y
+at that x, not any individual point. That is why a low R² can still mean a
+correct model applied to a noisy process.
+
+
+2. WHY VERTICAL DISTANCES, NOT PERPENDICULAR
+--------------------------------------------------------------------------------
+The instinct is to minimize the perpendicular distance to the line. OLS does not.
+The model is asymmetric: x is treated as known and fixed, and all the error is
+assumed to sit in y. We predict y from x, so only the error in y counts.
+
+Two consequences:
+  - Measurement error in x is not handled, and biases the slope toward zero
+    (attenuation bias).
+  - Minimizing perpendicular distance is a different method — Total Least Squares
+    — which is what you want when BOTH variables are noisy measurements.
+
+
+3. READING THE COEFFICIENTS
+--------------------------------------------------------------------------------
+Slope m: expected change in y per one-unit increase in x, carrying units. "The
+slope is 0.8" is meaningless; "0.8 kg per extra cm of height" is a finding.
+
+Intercept c: predicted y at x = 0, and often not interpretable — saying so is a
+mark of maturity. x = 0 may be impossible (zero height) or far outside the data,
+making the intercept an extrapolation. Centring x makes the intercept the
+predicted y at the AVERAGE x, which usually is interpretable.
+
+The line always passes through the centroid (x̄, ȳ). Useful anchor: the fit pivots
+around the middle of the data, so points far out on the x-axis have the most
+power to tilt it.
+
+
+4. SLOPE VS CORRELATION
+--------------------------------------------------------------------------------
+    slope = correlation × (spread of y / spread of x)
+
+  - Correlation is unitless and bounded in [-1, 1]. The slope is neither.
+  - They share a sign but say different things. A tiny slope can sit with a
+    correlation of 0.99 (tight but shallow); a steep slope with 0.2 (steep but
+    scattered).
+  - Correlation is symmetric; the slope is not. Regressing y on x and x on y give
+    two different lines, coinciding only when correlation is exactly ±1.
+
+Regression toward the mean falls out of this. Standardize both variables and the
+slope IS the correlation, always ≤ 1 in magnitude — so a point one SD above
+average in x is predicted less than one SD above average in y. Tall parents have
+tall children, but on average less extreme than themselves. No biological force
+needed, just imperfect correlation.
+
+    This is the source of endless bad analysis: "we coached the worst-performing
+    stores and they all improved" — the worst performers would have drifted back
+    toward average anyway.
+
+At d = 1 only, R² is literally the square of the correlation between x and y.
+
+
+5. THE SCATTER PLOT IS THE DIAGNOSTIC
+--------------------------------------------------------------------------------
+SLR is the one case where you can LOOK at the data and see everything: curvature,
+outliers, changing spread, clusters, and whether a line was ever sensible. Use it
+while you can — from MLR onward you are reduced to residual plots.
+
+Two plots answer most questions:
+  - y vs x with the fitted line — is a line the right shape at all?
+  - residuals vs fitted — any pattern means something is missing. A curve means
+    non-linearity; a funnel means non-constant variance.
+
+images/ in this folder holds worked examples, e.g. linearity_test.png.
+
+
+6. ANSCOMBE'S QUARTET
+--------------------------------------------------------------------------------
+Four datasets sharing nearly every summary statistic — same means, variances,
+correlation, fitted line and R² — that look completely different when plotted:
+
+    1. A genuine linear relationship.
+    2. A clean curve; a line is the wrong shape.
+    3. A perfect line with one outlier dragging the fit off it.
+    4. All points at one x value except one, which alone sets the slope.
+
+Identical metrics do not mean identical models. Never accept an R² without
+looking at the plot.
+
+
+7. CORRELATION IS NOT CAUSATION
+--------------------------------------------------------------------------------
+A slope says "these move together", never "x causes y". Three alternatives:
+reverse causation (y drives x), confounding (a third variable drives both — ice
+cream sales and drownings, both driven by temperature), and coincidence.
+
+With one predictor you cannot rule any of these out, because you cannot control
+for what is not in the model. That limitation is exactly what motivates MLR.
+
+
+8. WHEN SLR IS THE RIGHT TOOL
+--------------------------------------------------------------------------------
+Use it when one dominant driver explains most of the variation, when you need an
+explainable relationship more than the last percent of accuracy, or as a baseline
+and exploration tool.
+
+Do not use it when the plot is visibly curved (transform x, or go polynomial),
+when the spread of y grows with x (transform y), when a few extreme points steer
+the line, when you must predict outside the observed range of x, or when the
+outcome is a category (that is logistic regression).
+
+
+9. THE BRIDGE TO MLR
+--------------------------------------------------------------------------------
+Everything above survives; only the geometry changes. Two things change in kind:
+coefficients become PARTIAL effects ("the effect of x₁ holding x₂ fixed"), and
+features can now be correlated with each other, which is the whole topic of
+multicollinearity and has no SLR analogue.

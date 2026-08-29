@@ -1,0 +1,187 @@
+POLYNOMIAL LINEAR REGRESSION — CONCEPT & INTUITION
+==================================================
+Not a new algorithm: it is MLR run on columns manufactured from one feature.
+Everything in ../MLR/concept.txt applies, usually in a more extreme form.
+Math: ../mathematical_derivation.txt (X just has more columns).
+
+
+1. THE PROBLEM IT SOLVES
+--------------------------------------------------------------------------------
+Fuel efficiency against driving speed: crawling at 20 kmph is inefficient, so is
+flooring it at 140, and mileage peaks around 60.
+
+Fit a straight line and you get a slope near zero and a terrible fit — the model
+concludes speed does not affect mileage, the opposite of the truth. The
+relationship is strong; it just is not a line, and more data will not help,
+because the model cannot express a hump.
+
+Other genuinely curved relationships: crop yield vs fertilizer (rises, plateaus,
+then falls), house price vs area (the 4,000th sqft adds less than the 800th), car
+resale value vs age (steep drop, then slow decline).
+
+
+2. THE TRICK: MANUFACTURE COLUMNS
+--------------------------------------------------------------------------------
+Build new features from the one you have — speed, speed², speed³ — and hand them
+to ordinary MLR:
+
+    mileage = β₀ + β₁·speed + β₂·speed²
+
+With β₁ positive and β₂ negative, that is a downward parabola: the hump we
+needed. Same normal equations, same metrics, same assumptions. Only the design
+matrix got wider.
+
+This is why it is still LINEAR regression: "linear" refers to the PARAMETERS, not
+the shape of the curve. β₁ and β₂ enter as a plain weighted sum, so the problem
+stays convex with a closed form. Something like mileage = β₀·speed^β₁ is
+genuinely non-linear and has no closed form.
+
+Degree p is the only real hyperparameter, and it is the whole game.
+
+
+3. DEGREE IS THE BIAS-VARIANCE DIAL
+--------------------------------------------------------------------------------
+The cleanest illustration of bias-variance anywhere in ML. Thirty noisy readings
+of mileage against speed:
+
+    Degree 1  — a straight line. Misses the hump, wrong everywhere in the same
+                systematic way. Refit on fresh data and you get the same bad
+                line. High bias, low variance: UNDERFITTING.
+    Degree 2  — the parabola. Captures the shape, ignores the noise. Correct.
+    Degree 15 — passes through nearly every point. Training R² near 1 and
+                useless: it has modelled the measurement noise. Refit on fresh
+                data and the curve is wildly different. OVERFITTING.
+
+The tell is the gap between training and test error. Plot both against degree:
+training error falls forever, test error falls, bottoms out, then climbs. That
+minimum is your degree.
+
+This is the concrete version of the MLR point that adding columns can only reduce
+training RSS — so picking a degree by training R² always picks the highest one
+offered.
+
+
+4. IT GOES NUMERICALLY WRONG FAST
+--------------------------------------------------------------------------------
+    speed    speed²     speed³
+     20        400       8,000
+    140     19,600   2,744,000
+
+Two problems at once. The scales differ by orders of magnitude, which wrecks
+conditioning — gradient descent crawls or diverges, and even the closed form
+loses precision. And over a positive range, speed, speed² and speed³ all rise
+together, so their correlation is near 1: you have hand-built the worst possible
+multicollinearity, with all the symptoms from MLR section 6 (huge coefficients of
+opposite sign that cancel out, a fit that swings on one new data point).
+
+Two cheap fixes:
+  - Centre and scale x before expanding. Using (speed - 60) makes the powers of
+    small numbers in both directions, which largely decorrelates them.
+  - Use an orthogonal basis (Legendre, Chebyshev) instead of raw powers. Same
+    fitted curve, uncorrelated columns, stable coefficients. This is what
+    numpy.polynomial and R's poly() do by default.
+
+
+5. RUNGE'S PHENOMENON — THE EDGES OSCILLATE
+--------------------------------------------------------------------------------
+Raise the degree and the curve does not wiggle uniformly. It stays tame in the
+middle and goes berserk at the two ends.
+
+    Fit 24 months of sales with a degree-12 polynomial. Months 6 to 18 look
+    plausible. At the edges it invents a near-zero dip in February and a spike in
+    November that nothing in the business explains.
+
+Interior points are pinned down by data on both sides; edge points are not, so
+the curve is free to swing. It is why "just raise the degree" fails, and why
+splines exist — low-degree pieces joined together, so flexibility in one region
+cannot cause thrashing in another.
+
+Rule: past degree 3 or 4, ask whether you want a different model family instead.
+
+
+6. EXTRAPOLATION IS CATASTROPHIC
+--------------------------------------------------------------------------------
+    Fit quarterly revenue over 2020-2026 with a degree-4 polynomial: R² of 0.98
+    inside the window. Extend it to 2028 and it predicts negative ₹400 crore, or
+    four times the size of your market.
+
+Outside the data range the highest-power term dominates and x⁴ grows without
+limit. The curve has no notion of "revenue cannot be negative" — it only
+continues the shape that fit the window.
+
+A linear model extrapolates badly but sanely, at a constant slope. A polynomial
+extrapolates to nonsense fast. Treat any prediction outside the observed range of
+x as invalid, and say so when handing the model over.
+
+
+7. FEATURE EXPLOSION WITH MULTIPLE INPUTS
+--------------------------------------------------------------------------------
+One feature at degree p gives p columns. Several features give C(d+p, p), because
+a full expansion includes every cross term:
+
+    2 features,  degree 2  ->     5 columns (x₁, x₂, x₁², x₂², x₁x₂)
+    10 features, degree 3  ->   285 columns
+    20 features, degree 3  -> 1,770 columns
+
+With 500 rows and 285 columns you are near the d > n regime. The cross terms are
+also the interactions from MLR section 8, so you get every pairwise and three-way
+interaction whether you wanted them or not.
+
+Expand only the one or two features you have reason to think are curved, rather
+than calling PolynomialFeatures on the whole matrix.
+
+
+8. CHOOSING THE DEGREE
+--------------------------------------------------------------------------------
+Never by training error — it always favours the highest degree.
+
+Use cross-validation: sweep degree 1 to ~10, record mean validation error for
+each, plot, take the minimum. The curve is usually flat across two or three
+degrees near the bottom; when it is, take the SIMPLEST degree in that flat
+region. The difference is noise, and the lower degree extrapolates less
+dangerously.
+
+Supporting checks: adjusted R² (it penalizes added columns), the residual plot at
+your chosen degree (leftover curvature means the degree is too low), and domain
+sense — a quadratic for mileage-vs-speed has a story, an efficient cruising
+speed. A degree-9 fit has no story. If you cannot say what the shape MEANS, be
+suspicious of it.
+
+
+9. THE STANDARD PAIRING: POLYNOMIAL + RIDGE
+--------------------------------------------------------------------------------
+The production recipe is not "find the perfect degree". Expand to a generous
+degree, then regularize: fit degree 8 with ridge and the penalty shrinks the wild
+high-order coefficients toward zero, keeping the curve smooth. You have swapped a
+hard discrete choice for a continuous dial (λ) that CV can tune, and ridge is
+exactly the fix for the ill-conditioning in section 4.
+
+Standardize the expanded columns before penalizing, or speed³ is punished far
+harder than speed just for being larger. Do not penalize the intercept.
+
+When to leave polynomials behind:
+  - Splines / GAMs — low-degree pieces joined at knots. Local flexibility, no
+    Runge oscillation, saner edges. Usually the better answer for a genuinely
+    wiggly relationship.
+  - Trees — no curve fitting at all; they handle curvature and interactions
+    automatically when you do not need an interpretable functional form.
+  - A domain transform. log(x) for saturating returns, 1/x for rates, sqrt(x) for
+    diminishing effects. One well-chosen transform beats a degree-6 fit and comes
+    with a story.
+
+
+10. WHEN TO USE IT
+--------------------------------------------------------------------------------
+Use it when the plot shows clear simple curvature (one bend, maybe two), there is
+a reason to expect that shape (a physical optimum, saturation, diminishing
+returns), and a low degree of 2 or 3 is enough.
+
+Do not use it when the curve is wiggly (splines), when you must predict outside
+the training range, when you have many features and no idea which are curved, or
+when CV picks a high degree (6+) — that usually means the polynomial family is
+wrong, not that you need more terms.
+
+Summary: polynomial regression buys curvature for the price of manufactured
+columns, and pays in collinearity, edge oscillation and catastrophic
+extrapolation. Keep the degree low, centre and scale, regularize, choose by CV,
+and never trust it off the edge of the data.

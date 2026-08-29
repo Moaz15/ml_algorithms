@@ -1,0 +1,173 @@
+STAGE 1: BUSINESS PROBLEM FRAMING, SUCCESS METRICS, FEASIBILITY, ETHICS
+================================================================================
+
+The single most common failure in applied ML is not a bad model. It is a
+correctly trained model for a wrongly framed problem. This stage costs days and
+saves quarters.
+
+--------------------------------------------------------------------------------
+1. FROM BUSINESS PROBLEM TO ML PROBLEM
+--------------------------------------------------------------------------------
+
+The translation has four slots. If you cannot fill all four, you are not ready
+to touch data.
+
+    Decision      What action changes because of the prediction?
+    Prediction    What quantity, for which entity, at what time?
+    Label         How is the ground truth observed, and after how long?
+    Constraint    Latency, cost, coverage, interpretability, regulation.
+
+Example: "reduce customer churn"
+    Decision    : who gets a retention offer this week (budget: 5k offers)
+    Prediction  : P(user cancels within next 30 days), per active user, scored
+                  every Monday
+    Label       : cancellation event observed in the 30 days AFTER the score
+                  date -> the label matures 30 days late
+    Constraint  : batch scoring is fine (weekly), must explain to the CRM team
+                  why a user was picked
+
+Notice what the framing bought you:
+- It is a ranking problem under a budget of 5000, not a classification problem.
+  So the metric is precision@5000 / lift@k, not accuracy.
+- The label matures in 30 days, so the freshest 30 days of data are unusable for
+  training and your feedback loop is at best monthly.
+- Offers change behaviour, so the moment you deploy, your training data is
+  contaminated by your own intervention (see section 6).
+
+Common framings and their natural targets:
+    "Who will do X"          -> binary classification, ranked by score
+    "How much / how many"    -> regression, or quantile regression if the cost
+                                of over- and under-prediction differs
+    "Which one of these"     -> ranking / learning-to-rank, not classification
+    "Is this weird"          -> anomaly detection (labels usually absent)
+    "What is the effect of"  -> causal inference / uplift, NOT prediction.
+                                A churn model tells you who will leave. An uplift
+                                model tells you who will stay BECAUSE of the
+                                offer. These have different, sometimes disjoint,
+                                top-k sets. Confusing them is a classic and very
+                                expensive mistake.
+
+Do you even need ML? Prefer a rule if:
+- the mapping is a known deterministic policy (tax rules, thresholds in law),
+- there are fewer than a few hundred labelled examples,
+- errors are unacceptable rather than merely costly,
+- a simple heuristic already captures most of the value (see stage 5 baselines).
+
+--------------------------------------------------------------------------------
+2. SUCCESS METRICS: THREE LAYERS, NEVER ONE
+--------------------------------------------------------------------------------
+
+    Layer 1  Business KPI      revenue, retention rate, cost per resolved ticket
+    Layer 2  Product/proxy     offer acceptance rate, click-through, escalations
+    Layer 3  ML metric         AUC, PR-AUC, RMSE, NDCG@10, calibration error
+
+Rules:
+- Optimise layer 3, validate layer 2, get paid on layer 1.
+- Write down, before modelling, the assumed chain: "+0.02 PR-AUC -> +1.5pp
+  precision@5k -> ~180 extra saves/month -> ~X of retained revenue". If you
+  cannot write the chain, the ML metric is unanchored.
+- Every metric needs a guardrail metric that must NOT degrade (latency, fairness
+  gap, false-positive rate on a protected slice, support ticket volume).
+- Prefer a single decision metric plus guardrails over a weighted blend of five
+  metrics that nobody can reason about.
+
+Choosing the ML metric is a cost question, not a taste question. Write the cost
+matrix. If a false negative costs 20x a false positive, accuracy is meaningless
+and you should be tuning a threshold on expected cost. See 08_evaluation_metrics.
+
+Baselines to state alongside any target number:
+    - current system / human performance
+    - the trivial predictor (majority class, last value, global mean)
+    - the theoretical ceiling (label noise, irreducible error)
+"90% accuracy" is a fact about the base rate until you give these three.
+
+--------------------------------------------------------------------------------
+3. FEASIBILITY AND ROI
+--------------------------------------------------------------------------------
+
+Feasibility checklist (any "no" is a redesign, not a risk to accept):
+    Signal      Is there plausible predictive signal, i.e. do features causally
+                or reliably co-vary with the target? Sanity-check with a quick
+                correlation / small-sample model before committing a quarter.
+    Volume      Enough positives, not just enough rows. 10M rows with 40
+                positives is a 40-example problem.
+    Timeliness  Are features available AT PREDICTION TIME with acceptable
+                latency? A feature computed by a nightly job cannot serve a
+                real-time API without a feature store.
+    Label       Can you observe ground truth at all, and how late?
+    Ceiling     Even a perfect model - how much value? Sometimes the answer is
+                "the process downstream can only act on 200 cases/week", which
+                caps the value regardless of model quality.
+
+ROI sketch:
+    value  = (volume of decisions) x (improvement in decision quality)
+             x (value per decision) x (adoption rate)
+    cost   = build + data + serving infra + on-call + retraining + risk
+
+Adoption rate is the term engineers always forget and it is often 0.3. A model
+nobody trusts or that lands in a workflow nobody uses returns zero.
+
+Risk register worth keeping short and explicit:
+    - the label is a proxy for what you actually care about (proxy risk)
+    - training data reflects a past policy that will change (drift by design)
+    - the model creates a feedback loop that invalidates its own training data
+    - a rare-but-catastrophic error mode (safety, legal, reputational)
+    - single-source data dependency that can silently break upstream
+
+--------------------------------------------------------------------------------
+4. DATA AVAILABILITY, ETHICS AND PRIVACY AUDIT
+--------------------------------------------------------------------------------
+
+Before the first join, answer:
+    - Do we have the legal basis to use this data for THIS purpose? Consent
+      collected for billing does not automatically cover model training.
+    - Is there PII? Can it be dropped, hashed, tokenised, or aggregated? Default
+      to not ingesting what you do not need.
+    - Retention: how long may we keep it, and does the model itself count as a
+      derived artefact that must be deleted on a deletion request?
+    - Are protected attributes present? You often need them to MEASURE fairness
+      even when you must not USE them as features. Store them in an evaluation-
+      only table with restricted access. See 10_error_analysis_and_fairness.
+    - Proxy discrimination: postcode, device type, and name-derived features can
+      encode protected attributes. Removing the attribute does not remove the
+      bias.
+    - Is the decision high-stakes for an individual (credit, hiring, medical,
+      moderation)? Then interpretability and appeal paths are requirements, not
+      nice-to-haves, and may be legally mandated.
+
+--------------------------------------------------------------------------------
+5. WRITE THE ONE-PAGER BEFORE THE NOTEBOOK
+--------------------------------------------------------------------------------
+
+A design doc that fits on one page and contains:
+    problem, decision it feeds, entity + prediction time, label definition and
+    maturation lag, metric + guardrails + target, baseline, data sources,
+    serving mode and latency budget, main risks, what "kill this project" looks
+    like.
+
+The last item matters. Pre-committing to a stop condition is what separates an
+experiment from a sunk cost.
+
+--------------------------------------------------------------------------------
+6. FEEDBACK LOOPS: THE FRAMING TRAP
+--------------------------------------------------------------------------------
+
+Once deployed, the model influences the data it will next be trained on.
+    - Fraud model blocks transactions -> you never observe whether they were
+      fraudulent -> the next model is trained on the survivors only.
+      (selection bias / "reject inference")
+    - Recommender shows what it predicts you like -> clicks confirm it -> the
+      model becomes more confident about a narrowing slice (rich-get-richer).
+    - Churn model targets likely-churners with offers -> they stay -> the model
+      looks WRONG on exactly the users it got right.
+
+Mitigations, decided at framing time, not after:
+    - hold out a small random control that bypasses the model, permanently
+    - log the score, the decision, and the policy version with every event, so
+      you can reweight (inverse propensity) later
+    - use exploration (epsilon-random, Thompson sampling) where the cost allows
+    - evaluate against the control group, not against historical data
+
+If an interviewer asks "how would you know your model is working in production",
+the expected answer is "a holdout / A-B test against the control", not "monitor
+AUC".

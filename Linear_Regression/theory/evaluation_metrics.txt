@@ -1,0 +1,292 @@
+REGRESSION EVALUATION METRICS
+==============================
+
+Quick Reference Table
+------------------------------------------------------------------------------------------------------------------------
+Metric              | Scale-Dependent | Outlier Sensitivity | Interpretability
+---------------------|------------------|----------------------|-------------------------------
+MAE                  | Yes              | Low                  | High (same units as target)
+MSE                  | Yes (squared)    | High                 | Low (squared units)
+RMSE                 | Yes              | High                 | High (same units as target)
+MAPE                 | No (percentage)  | High (near y=0)      | High (intuitive %)
+RMSLE                | Reduced          | Low (log-damped)     | Medium
+Median Absolute Error| Yes              | Very Low (ignores)   | High
+Huber Loss           | Yes              | Medium (tunable)     | Medium
+R²                   | No               | High                 | High (0 to 1 scale)
+Adjusted R²          | No               | High                 | High (penalizes extra features)
+
+
+1. Mean Absolute Error (MAE)
+------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MAE = (1/n) * Σ |yᵢ − ŷᵢ|
+
+Meaning:
+    - Measures the average absolute difference between actual and predicted values.
+    - Tells you "on average, how far off" the predictions are.
+    - Easy to interpret — same units as the target variable.
+    - More robust to outliers compared to MSE (no squaring of errors).
+
+When to use:
+    - When all errors should be treated equally.
+    - When you want a simple, intuitive average error.
+    - When your data may contain outliers.
+
+Practical Scenarios:
+    - Delivery time prediction (Zomato, Swiggy)
+      → "On average, we are off by 6 minutes."
+
+    - Forecasting demand in retail (Amazon, Flipkart)
+      → Outliers (holiday spikes) shouldn't dominate the reported error.
+
+
+2. Mean Squared Error (MSE)
+-------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MSE = (1/n) * Σ (yᵢ − ŷᵢ)²
+
+Meaning:
+    - Measures the average of squared differences between actual and predicted values.
+    - Penalizes large errors heavily (because errors are squared).
+    - Useful when large deviations are especially harmful.
+
+Characteristics:
+    - Units are squared → not directly interpretable.
+    - More sensitive to outliers than MAE.
+    - Differentiable everywhere, which is why it's the default training loss for OLS/gradient descent
+      (MAE has a non-differentiable point at zero).
+
+When to use:
+    - When large mistakes must be penalized strongly.
+    - As a training objective (differentiability matters more than interpretability during optimization).
+
+Practical Scenarios:
+    - Loan default prediction (banks)
+      → Large prediction errors are extremely costly.
+
+    - Insurance claim cost prediction
+      → Underestimating big losses is dangerous.
+
+
+3. Root Mean Squared Error (RMSE)
+---------------------------------------------------------------------------------------------------------------------
+Formula:
+    RMSE = √MSE
+
+Meaning:
+    - Square root of MSE → brings metric back to the original units.
+    - Represents average magnitude of prediction error.
+    - Sensitive to large errors, but easier to interpret than MSE.
+
+When to use:
+    - When you want interpretability like MAE, but still want to penalize large errors more.
+    - Balanced choice for most regression tasks, especially for reporting to non-technical stakeholders.
+
+Practical Scenarios:
+    - Energy consumption forecasting (electricity usage)
+      → RMSE tells "typical error" in actual units (kWh).
+
+    - Weather forecasting (temperature, rainfall)
+      → Large errors matter more; but units must remain interpretable.
+
+
+4. Mean Absolute Percentage Error (MAPE)
+------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MAPE = (100/n) * Σ |(yᵢ − ŷᵢ) / yᵢ|
+
+Meaning:
+    - Expresses error as a percentage of the actual value — scale-independent.
+    - Lets you compare error across datasets/targets with different units or magnitudes.
+    - Undefined or exploding when yᵢ is at or near zero.
+    - Asymmetric: penalizes overprediction more heavily than underprediction for the same absolute error
+      (because the denominator shrinks as ŷᵢ grows relative to a fixed yᵢ).
+
+When to use:
+    - When stakeholders think in percentages rather than absolute units.
+    - When comparing forecast quality across products/regions with very different scales.
+    - Avoid when the target can be zero or near-zero.
+
+Practical Scenarios:
+    - Sales forecasting across products with vastly different price points
+      → "We're off by 8% on average" is comparable across a ₹200 item and a ₹20,000 item.
+
+    - SaaS revenue forecasting for executive dashboards
+      → Percentage error is more intuitive than absolute currency error.
+
+
+5. Root Mean Squared Log Error (RMSLE)
+------------------------------------------------------------------------------------------------------------------------
+Formula:
+    RMSLE = √[ (1/n) * Σ (log(1 + yᵢ) − log(1 + ŷᵢ))² ]
+
+Meaning:
+    - RMSE computed on log-transformed values — compresses large-magnitude differences.
+    - Penalizes underprediction more than overprediction (opposite skew from MAPE).
+    - Well-suited to targets spanning several orders of magnitude.
+
+When to use:
+    - When the target has exponential-like growth or wide dynamic range (counts, prices, population).
+    - When underestimating is worse than overestimating.
+
+Practical Scenarios:
+    - Demand/inventory count prediction (Kaggle-style forecasting competitions)
+      → Running out of stock (underprediction) is worse than overstocking.
+
+    - Website traffic or view-count prediction
+      → Errors on a video with 10M views shouldn't dominate errors on one with 100 views.
+
+
+6. Median Absolute Error
+------------------------------------------------------------------------------------------------------------------------
+Formula:
+    MedAE = median( |yᵢ − ŷᵢ| )
+
+Meaning:
+    - Robust central-tendency version of MAE — a few extreme outliers cannot shift it at all.
+    - Unlike MAE, which still averages in outlier contributions, MedAE ignores them entirely.
+
+When to use:
+    - When outliers are known data-quality issues, not signal, and should have zero influence.
+    - As a sanity-check metric alongside MAE/RMSE to see how much outliers are inflating the mean-based metrics.
+
+Practical Scenarios:
+    - Sensor data with occasional glitches/misreads
+      → A handful of corrupted readings shouldn't move the reported error at all.
+
+    - Property price prediction with rare ultra-luxury outliers
+      → MedAE reflects "typical" pricing error unaffected by a few mansions.
+
+
+7. Huber Loss
+------------------------------------------------------------------------------------------------------------------------
+Formula:
+    L_δ(e) = 0.5 * e²                     if |e| ≤ δ
+            δ * (|e| − 0.5 * δ)           if |e| > δ
+    where e = yᵢ − ŷᵢ
+
+Meaning:
+    - Hybrid of MSE and MAE: quadratic (like MSE) for small errors, linear (like MAE) for large errors.
+    - Differentiable everywhere (unlike MAE), while still being robust to outliers (unlike MSE).
+    - δ is a tunable threshold controlling where the loss switches behavior.
+
+When to use:
+    - As a training loss when you want outlier robustness but still need a gradient-friendly objective.
+    - Classic answer to "how would you make regression robust to outliers without losing differentiability."
+
+Practical Scenarios:
+    - Robust regression training pipelines where the training data has heavy tails (e.g. fraud amounts,
+      real-world sensor noise) but gradient-based optimization is still required.
+
+
+8. R² Score (Coefficient of Determination)
+------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    R² = 1 − (RSS / TSS)
+
+Meaning:
+    - Measures how much of the variance in y is explained by the model.
+    - R² = 1 → perfect prediction
+    - R² = 0 → model does no better than predicting the mean
+    - R² < 0 → model is worse than mean prediction
+
+When to use:
+    - To understand how much variation in y is captured by the model.
+    - For comparing models with the same dependent variable and the same dataset.
+
+Practical Scenarios:
+    - Academic/statistical modeling
+      → Measure explanatory power of a regression (econometrics).
+
+    - Business dashboards where interpretability matters
+      → R² shows "model quality" at a glance.
+
+
+9. Adjusted R²
+--------------------------------------------------------------------------------------------------------------------------------------------
+Formula:
+    Adjusted R² = 1 − [(1 − R²) * (n − 1) / (n − p − 1)]
+
+Where:
+    n = number of data points
+    p = number of predictors (features)
+
+Meaning:
+    - Adjusts R² for number of predictors.
+    - Penalizes adding irrelevant features.
+    - Only increases if the new feature genuinely improves model performance.
+
+When to use:
+    - Comparing models with different numbers of features.
+    - Avoiding overfitting when adding more predictors.
+
+Practical Scenarios:
+    - Feature selection in ML pipelines
+      → Helps detect if adding new features actually improves the model.
+
+    - Marketing mix modeling (MMM)
+      → Many candidate features (spend, impressions, seasonality); prefer simpler models unless new
+        predictors add real value.
+
+
+Key Relationships & Caveats
+------------------------------------------------------------------------------------------------------------------------
+    - RMSE ≥ MAE always, with equality only when every error has the same absolute magnitude.
+      The gap between them grows as errors become less uniform (more dominated by a few large errors).
+
+    - Minimizing MSE is equivalent to Maximum Likelihood Estimation under the assumption that residuals
+      are Gaussian-distributed. Minimizing MAE is equivalent to MLE under a Laplacian (double-exponential)
+      noise assumption. This is why MSE is the natural loss for OLS and MAE the natural loss for
+      quantile/median regression.
+
+    - R² is not well-defined for models without an intercept (some libraries compute it differently in
+      that case), can be artificially inflated by a single dominant/high-variance feature, and can go
+      negative on out-of-sample data if the model performs worse than predicting the mean.
+
+    - Adjusted R² only corrects for the number of predictors — it does not detect multicollinearity,
+      non-linearity, or omitted-variable bias, so a high Adjusted R² is not proof of a well-specified model.
+
+    - When RMSE is low but R² is also low, the target variable itself has low variance (errors are small
+      in absolute terms, but so is the spread of y, so the model isn't explaining much beyond the mean).
+
+
+Interview Q&A
+------------------------------------------------------------------------------------------------------------------------
+Q: Why would you report RMSE instead of MSE to a business stakeholder, but still use MSE as the training loss?
+A: RMSE is in the same units as the target, so "we're off by ₹500 on average" is directly interpretable,
+   while MSE's squared units aren't. During optimization, though, differentiability and smooth gradients
+   matter more than interpretability, and MSE's gradient is simpler and better-behaved than RMSE's
+   (RMSE's gradient involves an extra division by the RMSE value itself). In practice you train on MSE
+   and report RMSE.
+
+Q: MAE is robust to outliers, so why isn't it the default training loss for linear regression?
+A: MAE's gradient is constant in magnitude and undefined at zero error, which makes gradient-based
+   optimization less stable near the minimum and prevents the closed-form OLS solution (which relies on
+   MSE being smooth and quadratic). Huber loss is the usual middle ground: quadratic near zero for
+   stable gradients, linear for large errors for outlier robustness.
+
+Q: When would R² be misleading, and does Adjusted R² fix it?
+A: R² is misleading when a model has no intercept, when one high-variance feature dominates the fit
+   without real predictive value, or when comparing across different datasets/targets. Adjusted R² only
+   fixes one specific failure mode — it discourages adding features that don't improve fit — but it says
+   nothing about non-linearity, multicollinearity, or whether the model generalizes out-of-sample.
+
+Q: What's the probabilistic interpretation of MAE vs. MSE?
+A: Minimizing MSE is equivalent to maximum likelihood estimation assuming residuals are i.i.d. Gaussian.
+   Minimizing MAE is equivalent to MLE assuming residuals follow a Laplacian distribution, whose heavier
+   tails make it naturally more tolerant of large errors. This is also why the OLS estimator (MSE-minimizing)
+   is the mean-predicting solution, while the MAE-minimizing solution predicts the median.
+
+Q: Why does MAPE fail on some datasets, and what would you use instead?
+A: MAPE divides by the actual value, so it blows up or is undefined when yᵢ is zero or very small, and it's
+   asymmetric — it penalizes overprediction more than underprediction for symmetric absolute errors. When
+   the target can be near zero, use a scale-independent alternative like SMAPE (symmetric MAPE) or just
+   report RMSE/MAE alongside a normalized version (e.g. RMSE / mean(y)).
+
+Q: Given a business scenario, how do you decide which metric to optimize for?
+A: Start from what an error actually costs the business. If errors are equally bad in either direction and
+   outliers are noise, use MAE. If large errors are disproportionately costly (e.g. financial risk), use
+   MSE/RMSE. If stakeholders think in relative terms across differently-scaled targets, use MAPE. If
+   underprediction is worse than overprediction and the target spans orders of magnitude (e.g. inventory,
+   traffic), use RMSLE. Use R²/Adjusted R² separately as an explanatory-power diagnostic, not as the
+   optimization target itself.

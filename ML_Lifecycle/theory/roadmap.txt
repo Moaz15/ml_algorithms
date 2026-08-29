@@ -1,0 +1,73 @@
+ML LIFECYCLE: ROADMAP AND INDEX (MODEL-AGNOSTIC)
+================================================================================
+
+Purpose of this folder
+--------------------------------------------------------------------------------
+Every other folder in this repo answers "how does algorithm X work". This folder
+answers the question a Senior MLE interview actually spends most of its time on:
+"you are handed a business problem and a data warehouse - what do you do, in what
+order, and how do you know it worked?"
+
+Nothing here is tied to a specific model. These are the decisions that stay the
+same whether the model is logistic regression or a transformer.
+
+The nine stages
+--------------------------------------------------------------------------------
+1. Business and problem definition        -> 01_problem_framing.txt
+2. Data collection and ingestion          -> 02_data_collection_ingestion.txt
+3. Cleaning and EDA                       -> 03_eda_data_quality.txt
+4. Preprocessing and feature engineering  -> FeatureEngineering/theory/*
+                                             05_feature_selection.txt
+                                             04_data_splitting_validation.txt
+5. Model building and training            -> 06_baseline_and_model_selection.txt
+6. Hyperparameter tuning                  -> 07_hyperparameter_tuning.txt
+7. Evaluation and validation              -> 08_evaluation_metrics.txt
+                                             09_interpretability.txt
+                                             10_error_analysis_and_fairness.txt
+8. Deployment and serving                 -> 11_deployment_and_serving.txt
+9. Monitoring and maintenance (MLOps)     -> 12_monitoring_and_drift.txt
+                                             13_mlops_versioning_retraining.txt
+
+Interview drilling: interview_qa.txt in this folder.
+
+Related notes already in the repo
+--------------------------------------------------------------------------------
+    ../../bias_variance.txt              diagnosis of under/overfitting
+    ../../overfitting_underfitting.txt
+    ../../regularization_concept.txt
+    ../../handling_imbalanced_data.txt   resampling, thresholding, metrics
+    ../../optimization_gradient_descent.txt
+    ../../FeatureEngineering/theory/     imputation, outliers, encoding, scaling
+    ../../Dimensionality_Reduction/      PCA, t-SNE, feature extraction
+
+The one diagram to memorise
+--------------------------------------------------------------------------------
+The lifecycle is NOT a pipeline. It is two nested loops around a straight line:
+
+    business problem
+          |
+          v
+    [ data -> features -> model -> evaluation ]   <- inner loop (days)
+          |                              ^
+          |                              |
+          +---- deploy -> monitor -------+           <- outer loop (weeks/months)
+
+Inner loop: you iterate on features and models against an offline metric.
+Outer loop: production tells you the offline metric was measuring the wrong
+thing, or the world moved. Almost all real ML value and almost all real ML
+failure lives in the outer loop; almost all coursework lives in the inner one.
+Say this in an interview and you immediately sound senior.
+
+The three questions to ask at every stage
+--------------------------------------------------------------------------------
+1. What decision does this enable? If no decision changes, the work is waste.
+2. What is the leakage risk here? Every stage can leak the future into the past.
+3. Will this still be true at serving time? Availability, latency, distribution.
+
+Rules of thumb worth carrying
+--------------------------------------------------------------------------------
+- Ship the boring baseline first; it defines what "better" means.
+- The offline/online metric gap is a first-class artefact, not an annoyance.
+- Data quality beats model choice at almost every budget level.
+- Anything you compute over the full dataset before splitting is a bug.
+- Every model in production needs an owner, a rollback path, and an alarm.

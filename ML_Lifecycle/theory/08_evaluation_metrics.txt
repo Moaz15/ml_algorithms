@@ -1,0 +1,185 @@
+STAGE 7a: EVALUATION METRICS AND VALIDATION
+================================================================================
+
+Regression metric derivations (R^2, adjusted R^2, RMSE vs MAE) are covered in
+../../Linear_Regression/theory/evaluation_metrics.txt. Imbalanced-data metric
+choice is in ../../handling_imbalanced_data.txt. This file is the model-agnostic
+overview: what each metric measures, when it lies, and how to turn scores into
+decisions.
+
+--------------------------------------------------------------------------------
+1. THE CONFUSION MATRIX AND ITS FAMILY
+--------------------------------------------------------------------------------
+
+                      predicted +      predicted -
+    actual +             TP               FN        (type II error, a miss)
+    actual -             FP               TN        (type I error, false alarm)
+
+    Accuracy    = (TP+TN)/all       useless under imbalance: 99% accuracy on a
+                                    1%-positive problem = predicting "no".
+    Precision   = TP/(TP+FP)        of those we flagged, how many were right.
+                                    "Do not waste the action."
+    Recall/TPR  = TP/(TP+FN)        of the real positives, how many we caught.
+                                    "Do not miss the case."
+    Specificity = TN/(TN+FP)        true negative rate.
+    FPR         = FP/(FP+TN)        = 1 - specificity.
+    F1          = harmonic mean of precision and recall. The harmonic mean
+                  punishes imbalance between the two - 1.0 and 0.1 gives 0.18,
+                  not 0.55.
+    F-beta      = (1+b^2) PR / (b^2 P + R). b > 1 weights recall (b=2 for
+                  medical screening), b < 1 weights precision (b=0.5 when an
+                  action is expensive).
+    MCC         = correlation between predicted and actual labels, uses all four
+                  cells, robust under imbalance. Underused and a good answer to
+                  "what would you use instead of F1".
+    Balanced acc= mean of recall and specificity; Cohen's kappa corrects
+                  accuracy for chance agreement.
+
+Precision-recall trade-off: both are functions of the threshold. Lower the
+threshold -> recall up, precision usually down. Any claim about precision or
+recall without stating the threshold is incomplete.
+
+--------------------------------------------------------------------------------
+2. THRESHOLD-FREE METRICS: ROC-AUC VS PR-AUC
+--------------------------------------------------------------------------------
+
+ROC curve: TPR vs FPR across all thresholds. AUC = P(score of a random positive
+> score of a random negative), i.e. a pure RANKING quality measure. 0.5 is
+random, 1.0 is perfect.
+
+Properties:
+    + invariant to the class balance and to any monotonic transform of scores
+    + summarises all thresholds at once, good for comparing model candidates
+    - that same balance-invariance is the problem under heavy imbalance: FPR has
+      a huge denominator (TN), so thousands of false positives barely move the
+      curve. A model with 0.95 ROC-AUC can still be operationally useless at 1%
+      positives.
+    - it says nothing about calibration or about performance at the one
+      threshold you will actually deploy.
+
+PR curve: precision vs recall. Its baseline is the positive base rate (not 0.5),
+so PR-AUC / average precision is NOT comparable across datasets with different
+prevalence. Use PR-AUC when positives are rare and you care about the flagged
+set: fraud, search relevance, rare-disease screening.
+
+Rule of thumb: care about both classes and roughly balanced -> ROC-AUC. Care
+about the positive class under imbalance -> PR-AUC (average precision).
+
+Operating-point metrics matter more than either in production:
+    precision@k, recall@k, lift@k    when you have a fixed action budget
+    recall at fixed precision        "how many frauds do we catch while keeping
+                                     the false-alarm rate under 2%"
+    partial AUC                      restricted to the FPR range you can afford
+
+--------------------------------------------------------------------------------
+3. THRESHOLD SELECTION IS A BUSINESS DECISION
+--------------------------------------------------------------------------------
+
+Never keep 0.5 by default. Choose it by one of:
+
+    Expected cost minimisation - the principled answer. With costs C_FP and C_FN,
+    the optimal threshold for a CALIBRATED probability is
+
+        t* = C_FP / (C_FP + C_FN)
+
+    (act when p * C_FN > (1-p) * C_FP). If a miss costs 10x a false alarm,
+    t* = 1/11 = 0.09, not 0.5. This formula, and the fact that it requires
+    calibrated probabilities, is a standard senior-level question.
+
+    Capacity constraint    - pick the threshold that yields k alerts per day.
+    Metric target          - the point maximising F1/F-beta on validation, or
+                             the highest recall subject to precision >= p_min.
+    Youden's J             - argmax(TPR - FPR); assumes symmetric costs, so it
+                             is rarely the right business answer.
+
+Tune the threshold on validation, verify on test, and store it as configuration
+so it can be changed without retraining. Under class rebalancing or negative
+downsampling the threshold also has to be re-derived on the natural base rate.
+
+--------------------------------------------------------------------------------
+4. CALIBRATION: THE MOST OVERLOOKED PART OF EVALUATION
+--------------------------------------------------------------------------------
+
+A model is calibrated if, among predictions of 0.7, about 70% are positive.
+Ranking quality (AUC) and calibration are independent: a perfectly ranked model
+can be badly calibrated, and recalibrating never changes AUC.
+
+You need calibration whenever the probability itself feeds a decision:
+expected-value calculations, pricing, risk scores shown to humans, thresholds
+derived from costs, or combining model outputs with other estimates.
+
+Measuring it:
+    - reliability diagram: bin predictions, plot mean predicted vs observed
+      frequency; the diagonal is perfect. Look at the shape, not just the score.
+    - Expected Calibration Error (ECE): weighted mean gap across bins. Sensitive
+      to binning choices; report the bin count.
+    - Brier score = mean squared error of probabilities. A PROPER scoring rule,
+      minimised only by the true probabilities, and it decomposes into
+      reliability, resolution and uncertainty. Log loss is the other standard
+      proper score, and it punishes confident mistakes much harder (an infinite
+      penalty for a confident wrong prediction at probability 0 or 1) - which is
+      why log loss is the better training loss and Brier the friendlier report.
+
+Who is miscalibrated and why:
+    Logistic regression      naturally well calibrated (it optimises log loss)
+    SVM                      outputs distances, not probabilities
+    Naive Bayes              extreme, over-confident probabilities because of
+                             the independence assumption
+    Random forest            pulled toward the middle by averaging
+    Boosted trees            over-confident at the extremes
+    Deep nets                systematically over-confident, worse with more
+                             capacity
+    Any model after resampling or class weighting - the base rate is shifted
+
+Fixes, fitted on a held-out calibration set (never on the training data):
+    Platt scaling        fit a logistic regression on the model's scores.
+                         Parametric, works with little data, assumes a sigmoid
+                         shape of the distortion.
+    Isotonic regression  fit a non-decreasing step function. More flexible, can
+                         fix any monotone distortion, needs more data (>= a few
+                         thousand) or it overfits.
+    Temperature scaling  single-parameter softmax scaling for neural nets; keeps
+                         the argmax unchanged, so accuracy is untouched.
+
+--------------------------------------------------------------------------------
+5. REGRESSION, RANKING, AND OTHER TASK TYPES
+--------------------------------------------------------------------------------
+
+Regression (details in the Linear_Regression note):
+    MAE      robust, in target units, optimised by the conditional MEDIAN
+    RMSE     penalises large errors, optimised by the conditional MEAN, in units
+    MSE      same ordering as RMSE, not in units
+    MAPE     scale-free but explodes near zero and is asymmetric (it punishes
+             over-prediction more); sMAPE and MASE are the usual repairs
+    R^2      fraction of variance explained relative to the mean predictor; can
+             be negative; adjusted R^2 penalises extra features
+    Quantile / pinball loss   the right metric when over- and under-prediction
+             have different costs, and the way to produce prediction intervals
+
+Ranking / recommendation:
+    Precision@k, Recall@k, MAP, MRR, NDCG@k (position-discounted, handles graded
+    relevance), coverage and diversity as guardrails.
+
+Clustering (no labels): silhouette, Davies-Bouldin, Calinski-Harabasz;
+with labels: ARI, NMI. See ../../Clustering/.
+
+Probabilistic forecasting: CRPS, pinball loss, interval coverage.
+
+Generative / LLM systems: task-specific automatic metrics are weak; use
+human/LLM-as-judge with a rubric, pairwise preference, and a fixed golden set.
+
+--------------------------------------------------------------------------------
+6. REPORTING WITHOUT MISLEADING
+--------------------------------------------------------------------------------
+
+    - always alongside the baseline (Tier 0/1/2 from 06_...) and the ceiling
+    - always with an uncertainty estimate (bootstrap CI on the test set)
+    - always with slice results, not only the aggregate (10_error_analysis)
+    - state the threshold, the base rate, and the test-set size
+    - offline metric vs online metric: state the expected chain from 01_..., and
+      treat a discrepancy as information about the framing, not as noise
+    - beware Simpson's paradox: a model can be better overall and worse on every
+      segment (or the reverse) when segment sizes differ between the compared
+      populations
+    - beware Goodhart's law: once a metric becomes the target, it stops being a
+      good measure. Guardrails exist for this reason.

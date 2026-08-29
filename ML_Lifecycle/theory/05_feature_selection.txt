@@ -1,0 +1,184 @@
+STAGE 4b: FEATURE SELECTION AND IMPORTANCE SCORING
+================================================================================
+
+Feature ENGINEERING (creating features) lives in ../../FeatureEngineering/.
+Feature EXTRACTION (PCA, t-SNE, autoencoders) lives in
+../../Dimensionality_Reduction/. This file is about choosing which of the
+features you already have to keep - a decision that is model-agnostic in its
+logic even though the tools differ per model.
+
+--------------------------------------------------------------------------------
+1. WHY SELECT AT ALL
+--------------------------------------------------------------------------------
+
+Reasons, in the order they actually justify the work:
+
+    Serving cost      every feature is a pipeline, a dependency, an on-call
+                      page and a latency contribution. Halving the feature set
+                      often halves the operational surface for a 0.001 metric
+                      cost. This is usually the real reason.
+    Variance          with p comparable to n, extra noise features increase
+                      variance and overfitting. The curse of dimensionality:
+                      distance-based methods degrade as dimensions grow because
+                      all pairwise distances concentrate.
+    Interpretability  a 30-feature model can be explained to a stakeholder or a
+                      regulator; a 3000-feature one cannot.
+    Stability         fewer, more robust features drift less.
+    Legal             some features must not be used (protected attributes and
+                      their close proxies).
+
+Reasons that do NOT justify it: "the model will be faster to train" (usually
+irrelevant), "more features are always worse" (they are not, for regularised
+models and trees with enough data).
+
+Selection vs extraction: selection keeps original columns (interpretable, and
+you can drop the upstream pipeline); extraction builds new combinations (often
+more compressive, but every source column is still required at serving time).
+
+--------------------------------------------------------------------------------
+2. FILTER METHODS - rank by a statistic, model-independent
+--------------------------------------------------------------------------------
+
+    Variance threshold        drop near-constant columns. Cheap first pass.
+    Correlation with target   Pearson (linear), Spearman (monotonic).
+    Chi-square                categorical feature vs categorical target
+                              (non-negative features only).
+    ANOVA F                   numeric feature vs categorical target.
+    Mutual information        captures ANY dependency including non-linear;
+                              needs enough data, and estimator choice matters
+                              for continuous variables.
+    Redundancy filtering      drop one of each highly correlated pair; mRMR
+                              (max relevance, min redundancy) formalises this.
+
+Pros: fast, scalable, done once before any modelling.
+Cons: univariate. They miss interactions (a feature useless alone but decisive
+in combination - XOR) and they ignore redundancy unless you add it explicitly.
+
+Critical: filter selection must be fitted INSIDE the CV fold. Selecting the top
+k features by correlation on the full dataset and then cross-validating is
+textbook leakage and produces spectacular, fake results.
+
+--------------------------------------------------------------------------------
+3. WRAPPER METHODS - search over subsets, evaluated by a model
+--------------------------------------------------------------------------------
+
+    Forward selection     start empty, greedily add the feature that most
+                          improves CV score, stop when improvement < epsilon.
+    Backward elimination   start full, greedily drop the least damaging.
+                          Better at spotting interactions than forward, but
+                          requires p < n and is expensive.
+    Recursive Feature      fit, drop the lowest-importance k, refit, repeat.
+    Elimination (RFE)      RFECV picks the subset size by cross-validation.
+    Stepwise / exhaustive  exhaustive is 2^p subsets - infeasible beyond ~20
+                          features.
+
+Pros: accounts for interactions and for the specific model.
+Cons: expensive (O(p^2) model fits for greedy search), and prone to overfitting
+the validation set because you are running many comparisons against it. Use
+nested CV or a separate held-out set when reporting the result.
+
+--------------------------------------------------------------------------------
+4. EMBEDDED METHODS - selection as a side effect of training
+--------------------------------------------------------------------------------
+
+    L1 / Lasso            the L1 penalty's corner geometry drives coefficients
+                          exactly to zero. With correlated features it picks one
+                          arbitrarily and zeroes the rest, and is unstable under
+                          resampling. Elastic Net (L1 + L2) fixes the grouping
+                          behaviour. See ../../regularization_concept.txt.
+    Tree impurity         built into any tree ensemble. Cheap, but see the
+    importance            biases in section 5.
+    Gradient boosting     gain-based importance plus native handling of
+                          missing values and monotonic constraints.
+    Attention / learned   in deep models, gates or sparsity penalties on inputs.
+    masks
+
+Pros: one training run, interaction-aware, model-consistent.
+Cons: the selection inherits the model's biases; a Lasso-selected set may be
+wrong for a tree model and vice versa.
+
+--------------------------------------------------------------------------------
+5. IMPORTANCE SCORING: WHAT EACH NUMBER ACTUALLY MEANS
+--------------------------------------------------------------------------------
+
+Mean Decrease in Impurity (MDI, "feature_importances_" on trees)
+    Sum of impurity reduction from splits on that feature, weighted by samples.
+    Free (computed during training). Two serious biases:
+      - favours high-cardinality and continuous features, because they offer
+        more candidate split points and can reduce impurity by chance
+      - computed on TRAINING data, so it rewards overfitting splits
+    Never present MDI as the final word.
+
+Permutation importance
+    Shuffle one feature's column in a HELD-OUT set, measure the drop in the
+    metric. Model-agnostic, measured on data the model did not see, and directly
+    tied to the metric you care about.
+    Failure mode: with correlated features, shuffling one leaves the information
+    available through its correlated twin, so both look unimportant. It also
+    evaluates the model at unrealistic feature combinations (the shuffled value
+    may be impossible given the other columns). Fix by permuting correlated
+    groups together, or use conditional permutation.
+
+Drop-column importance
+    Retrain without the feature and measure the difference. The most honest
+    definition of "how much does this feature contribute", and the most
+    expensive (one retrain per feature). Also splits credit oddly among
+    duplicated features: drop either of two identical columns and nothing
+    changes, so both score zero.
+
+SHAP values
+    Per-prediction additive attributions with a game-theoretic uniqueness
+    guarantee; global importance = mean |SHAP| per feature. Best default for
+    explanation. TreeSHAP is exact and fast for trees. Caveats in
+    09_interpretability.txt - notably that SHAP explains the MODEL, not the
+    world, and correlated features still split credit.
+
+Coefficients (linear models)
+    Only comparable across features if the features are standardised. And they
+    are conditional effects, not marginal ones - the coefficient of x1 is "the
+    effect of x1 holding all others fixed", which is meaningless if x1 and x2
+    always move together.
+
+The single most important framing: importance is not causation, and a
+low-importance feature is not a useless feature - it may be redundant with a
+kept one, or important only on a small but critical slice.
+
+--------------------------------------------------------------------------------
+6. A PRACTICAL SELECTION RECIPE
+--------------------------------------------------------------------------------
+
+    1. Drop the obviously dead: constant, near-constant, >95% null with no
+       signal in the missingness, IDs, and anything failing the leakage test.
+    2. Drop the operationally impossible: not available at serving time, or too
+       slow/expensive to compute.
+    3. Cheap filter pass to cut a very wide space (thousands -> hundreds) using
+       mutual information or a quick GBM's importances.
+    4. Fit a regularised model or a GBM on what remains; rank by permutation
+       importance on validation data.
+    5. Add a random noise column as a control ("shadow feature" / Boruta idea):
+       anything scoring below the noise feature is not carrying signal.
+    6. Walk down the ranking and cut where the CV metric starts to degrade
+       beyond your tolerance; prefer the smaller set when the difference is
+       inside the confidence interval.
+    7. Check stability: repeat selection across folds/bootstraps and keep the
+       features that survive most of the time. A feature set that changes
+       completely between folds is noise-fitting.
+    8. Re-verify on the golden/slice evaluation - a feature that only matters
+       for 3% of traffic will look droppable on the aggregate metric and will
+       not be.
+
+--------------------------------------------------------------------------------
+7. INTERVIEW-GRADE NUANCES
+--------------------------------------------------------------------------------
+
+- "Should I remove correlated features?" For prediction with a regularised model
+  or trees: usually unnecessary. For interpretation, coefficient stability, or
+  serving cost: yes. See multicollinearity in 03_eda_data_quality.txt.
+- Selection is a hyperparameter. Tuning it on the same data you report on is
+  optimistic. Nest it.
+- With p >> n (genomics, text), regularisation and dimensionality reduction beat
+  greedy search, and stability selection (bootstrap + frequency of selection) is
+  the standard defence against false positives.
+- Deep learning is often framed as making selection obsolete; in tabular
+  production systems the opposite is true - feature cost and reliability, not
+  accuracy, drive the decision.

@@ -1,0 +1,179 @@
+STAGE 9b: RETRAINING, VERSIONING AND MLOPS FOUNDATIONS
+================================================================================
+
+--------------------------------------------------------------------------------
+1. THE THREE ARTEFACTS THAT MUST BE VERSIONED TOGETHER
+--------------------------------------------------------------------------------
+
+    Code     git. Training code, feature code, serving code, config.
+    Data     a dataset snapshot identified by a content hash or a pointer:
+             DVC, LakeFS, Delta/Iceberg time travel, or an immutable partitioned
+             table with a snapshot id. "SELECT * FROM users" is not a version.
+    Model    the artefact plus its metadata in a model registry.
+
+A model version is the TRIPLE (code commit, data snapshot, config). Reproducing
+a result means reproducing all three. If any one is unversioned, the model is
+not reproducible, and an unreproducible model cannot be debugged or defended.
+
+Model registry entry should carry: name, version, stage (staging/production/
+archived), training run id, metrics (aggregate and per slice), data snapshot id,
+code commit, dependency lockfile/image digest, owner, approval record, and the
+model card.
+
+--------------------------------------------------------------------------------
+2. THE PIPELINE, NOT THE MODEL, IS THE PRODUCT
+--------------------------------------------------------------------------------
+
+The central MLOps idea: do not ship a trained model, ship the automated process
+that produces trained models. Levels of maturity (the Google MLOps 0/1/2
+framing):
+
+    Level 0  manual. A notebook produces a pickle; someone deploys it by hand.
+             Retraining is a project. Fine for a first model, not for five.
+    Level 1  automated training pipeline. Data validation, training, evaluation,
+             and registration run as one orchestrated pipeline that can be
+             triggered on a schedule or an event. Continuous training.
+    Level 2  automated CI/CD for the pipeline itself: changes to feature or
+             training code are tested, built, and deployed automatically; the
+             pipeline then produces and deploys models.
+
+Orchestration: Airflow, Dagster, Prefect, Kubeflow Pipelines, Metaflow, or
+Vertex/SageMaker Pipelines. The tool matters far less than that the steps are
+declarative, idempotent, and re-runnable.
+
+CI for ML adds to normal software CI:
+    - unit tests on feature transformations (a transform with no test WILL drift)
+    - data validation gates (schema, ranges, null rates) that fail the run
+    - a training smoke test on a small sample
+    - model quality gates: the new model must beat the incumbent on the frozen
+      evaluation set AND on every protected slice, not just on average
+    - behavioural tests (invariance/directional, see 10_...)
+    - a comparison report as the artefact a human approves
+
+--------------------------------------------------------------------------------
+3. WHEN TO RETRAIN
+--------------------------------------------------------------------------------
+
+Triggers, and when each is appropriate:
+
+    Scheduled (cadence)     simple, predictable, easy to reason about. Choose the
+        cadence from measured decay: retrain models at different data ages
+        offline, plot metric vs data staleness, and pick the interval where the
+        curve starts to bend. Daily for fraud/ads, weekly-monthly for churn,
+        quarterly for slow-moving risk models.
+    Performance-triggered   retrain when the monitored metric crosses a
+        threshold. Correct in principle, but requires labels and therefore
+        reacts late.
+    Drift-triggered         retrain when PSI/domain-classifier AUC crosses a
+        threshold. Faster, but drift does not always mean degradation - verify
+        impact before spending a retrain, or you will chase seasonality forever.
+    Event-triggered         a product launch, a new market, a policy change, a
+        known regime shift. Do not wait for a monitor to notice something you
+        already know.
+    Data-volume-triggered   enough new labelled data has accumulated to matter.
+
+Retraining is not free: it costs compute, it needs validation and approval, and
+every retrain is a chance to ship a regression. Prefer a cadence you can validate
+properly over a hair-trigger.
+
+--------------------------------------------------------------------------------
+4. HOW TO RETRAIN
+--------------------------------------------------------------------------------
+
+Training window:
+    Expanding  keep everything. Maximum data, but old regimes dilute the recent
+               one under concept drift.
+    Sliding    last N months only. Adapts faster, higher variance, and it will
+               forget rare events (an annual seasonal pattern is invisible to a
+               3-month window).
+    Weighted   keep everything, weight recent samples higher (exponential decay).
+               Usually the best compromise; the half-life becomes a tuned
+               hyperparameter.
+Choose by backtesting: replay the last year, retrain at each step with each
+policy, compare the realised metric curve. This rolling-origin backtest is the
+correct way to answer "how often and on how much data should we retrain", and
+saying so is a strong interview answer.
+
+Warm start vs from scratch: continuing from previous weights is cheaper and
+smoother, but it accumulates path dependence and makes reproducibility harder;
+periodic from-scratch retrains reset that. Full retrain is the default for
+tabular models where training is cheap.
+
+Automatic promotion requires all of: quality gates passed on a FROZEN evaluation
+set (not one regenerated by the same pipeline), slice gates passed, prediction
+distribution sane versus the incumbent, and a shadow or canary period. Anything
+less means an automated pipeline can silently ship a broken model at 3am - which
+is the standard cautionary tale about full automation.
+
+--------------------------------------------------------------------------------
+5. ROLLBACK AND INCIDENT RESPONSE
+--------------------------------------------------------------------------------
+
+    - Keep the previous N model versions deployable, not just stored.
+    - Rollback must be a config change (pointer to a version), not a rebuild.
+    - Test rollback regularly; an untested rollback is a hope.
+    - Have a non-ML fallback: the previous model, a heuristic, or a safe default
+      decision, for when the feature pipeline itself is down.
+    - Know what rollback does NOT fix: if the cause is upstream data corruption,
+      the old model consumes the same bad features. Diagnose the layer first
+      (see the four layers in 12_monitoring_and_drift.txt).
+    - Post-incident: write down the detection gap ("how long until we knew") and
+      add the monitor that would have caught it sooner.
+
+--------------------------------------------------------------------------------
+6. THE FEATURE STORE, AND WHETHER YOU NEED ONE
+--------------------------------------------------------------------------------
+
+What it provides: a single versioned definition per feature, an offline store
+for point-in-time correct training data, an online store for low-latency reads,
+reuse across teams and models, and freshness monitoring.
+
+You need one when several models share features, when online and offline paths
+would otherwise be implemented twice, or when point-in-time joins are error-prone
+in your data. You do not need one for a single batch-scored model - a table and a
+scheduled job are enough, and a premature feature store is a large amount of
+infrastructure for one consumer.
+
+--------------------------------------------------------------------------------
+7. TECHNICAL DEBT SPECIFIC TO ML
+--------------------------------------------------------------------------------
+
+From "Hidden Technical Debt in Machine Learning Systems" - worth being able to
+name in an interview:
+
+    Boundary erosion      ML models entangle inputs; CACE: Changing Anything
+                          Changes Everything. No feature is independent.
+    Correction cascades   model B corrects model A's output; now A cannot be
+                          changed without breaking B.
+    Undeclared consumers  someone reads your prediction table and builds on it
+                          without telling you. Access control and contracts.
+    Data dependencies     costlier than code dependencies and usually untracked;
+                          an unused feature still costs a pipeline. Prune
+                          features deliberately (leave-one-feature-out runs).
+    Feedback loops        direct (the model influences its own training data) and
+                          hidden (two models influencing each other through the
+                          world).
+    Configuration debt    thresholds, windows and flags scattered across the
+                          system; version and test configuration like code.
+    Pipeline jungles      scrapers and scripts glued together; the fix is
+                          orchestration and a curated data layer.
+    Glue code             the model is 5% of the code; the other 95% is plumbing.
+
+--------------------------------------------------------------------------------
+8. A MINIMAL, HONEST MLOPS STACK
+--------------------------------------------------------------------------------
+
+You do not need everything. In rough order of return on effort:
+
+    1. Versioned data snapshots and a reproducible training script
+    2. Experiment tracking (MLflow or equivalent)
+    3. Prediction + outcome logging in production
+    4. Data validation gates in the pipeline
+    5. A model registry with stages and approvals
+    6. Scheduled retraining with quality gates
+    7. Monitoring dashboards and alerts
+    8. Shadow/canary deployment and one-config rollback
+    9. A feature store (only when several models justify it)
+
+Steps 1-4 prevent most disasters. Teams that skip them and start at step 9 build
+impressive infrastructure around unreproducible models.

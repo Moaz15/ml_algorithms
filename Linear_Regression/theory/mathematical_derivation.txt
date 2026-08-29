@@ -1,0 +1,587 @@
+LINEAR REGRESSION — MATHEMATICAL DERIVATION (SLR + MLR)
+=======================================================
+
+Scope of this file
+------------------------------------------------------------------------------
+This is the shared derivation file for the whole Linear_Regression topic. It
+covers both variants in one place, because SLR is nothing more than the d = 1
+special case of MLR:
+
+    Part 1 : Setup and notation
+    Part 2 : The squared-error objective — where it comes from
+    Part 3 : SLR derivation from first principles (scalar calculus)
+    Part 4 : MLR derivation (matrix calculus, normal equations)
+    Part 5 : The geometry — projection onto the column space
+    Part 6 : Invertibility of XᵀX, and what to do when it fails
+    Part 7 : Gradient descent, convexity, and convergence
+    Part 8 : Regularized closed forms (Ridge / Lasso)
+    Part 9 : Statistical properties (unbiasedness, variance, Gauss-Markov)
+    Part 10: Cost of each method, and when to use which
+    Part 11: Interview-ready one-liners
+
+Companion files (deliberately NOT duplicated here):
+    assumptions.txt        — the LINE assumptions, why each matters, how to test
+    evaluation_metrics.txt — R², adjusted R², RMSE, MAE, MAPE and their traps
+    SLR/concept.txt, MLR/concept.txt — intuition and worked narrative
+    ../code/SLR/, ../code/MLR/ — from-scratch implementations of everything below
+
+
+PART 1 — SETUP AND NOTATION
+==============================================================================
+
+Data: n observations, d features.
+
+    xᵢ ∈ ℝ^d   feature vector for observation i (row of X)
+    yᵢ ∈ ℝ     target for observation i
+    X  ∈ ℝ^(n × d)   design matrix, one row per observation
+    y  ∈ ℝ^n         target vector
+    β  ∈ ℝ^d         coefficient vector
+
+Intercept handling. Rather than carrying β₀ separately, append a column of
+ones to X:
+
+    X = [1 | x₁ | x₂ | ... | x_d]   so X ∈ ℝ^(n × (d+1)),  β ∈ ℝ^(d+1)
+
+This is the "bias trick". Everything below assumes it unless stated, which is
+why the MLR derivation never needs a separate ∂/∂β₀ step.
+
+Model (the thing we assume generated the data):
+
+    y = Xβ + ε          ε ~ (0, σ²I)     — errors mean-zero, equal variance,
+                                           uncorrelated (see assumptions.txt)
+
+Prediction (the thing we compute):
+
+    ŷ = Xβ̂
+
+Residual vs error — a distinction interviewers probe:
+
+    error    εᵢ = yᵢ - xᵢᵀβ    (uses the TRUE unknown β; unobservable)
+    residual eᵢ = yᵢ - xᵢᵀβ̂    (uses the ESTIMATED β̂; computable)
+
+Note "linear" refers to linearity in the PARAMETERS, not in the features.
+ŷ = β₀ + β₁x + β₂x² is still linear regression — you fit it by putting x² in
+as a column of X. What is NOT linear regression: ŷ = β₀ + x^β₁.
+
+SLR is this with d = 1. To keep it readable, Part 3 uses the classic scalar
+notation ŷ = m·x + c, where m ≡ β₁ (slope) and c ≡ β₀ (intercept).
+
+
+PART 2 — THE OBJECTIVE: WHY SQUARED ERROR
+==============================================================================
+
+We choose β̂ to minimize the sum of squared residuals:
+
+    SSE(β) = Σᵢ (yᵢ - xᵢᵀβ)²  = ||y - Xβ||²
+
+    MSE(β) = (1/n) · SSE(β)
+
+    J(β)   = (1/(2n)) · SSE(β)      ← the 1/2 is a convenience: it cancels
+                                      the 2 from differentiating the square
+
+Scaling by 1/n or 1/(2n) does not move the minimizer — it only rescales the
+gradient (and therefore the learning rate you need). The code uses 1/(2n).
+
+Three independent justifications for squaring — a good answer gives more than
+the first:
+
+1. Differentiability / closed form. |e| has no derivative at 0 and gives no
+   closed-form solution; e² is smooth and convex, so setting the gradient to
+   zero yields a linear system we can solve exactly.
+
+2. Maximum likelihood under Gaussian noise. If ε ~ N(0, σ²I), the likelihood is
+
+       L(β) = Πᵢ (1/√(2πσ²)) · exp( -(yᵢ - xᵢᵀβ)² / (2σ²) )
+
+   Taking logs:
+
+       log L(β) = -(n/2)·log(2πσ²) - (1/(2σ²)) · Σᵢ (yᵢ - xᵢᵀβ)²
+
+   The only β-dependent term is -Σ(yᵢ - xᵢᵀβ)². So maximizing likelihood is
+   EXACTLY minimizing SSE. This is the key line: OLS = MLE under Gaussian
+   errors. Under Laplace errors, the same argument gives MAE / quantile
+   regression instead.
+
+3. It estimates the conditional mean. The minimizer of E[(y - f(x))²] over all
+   functions f is f(x) = E[y | x]. Squared error is the loss whose optimum is
+   the conditional mean; absolute error targets the conditional median.
+
+Cost of that choice: squaring makes the loss grow quadratically in the
+residual, so a single far-out point can dominate the fit. OLS is not robust to
+outliers — that is the price of the closed form. Remedies: Huber loss,
+quantile regression, RANSAC, or removing/winsorizing the point after
+diagnosing it.
+
+
+PART 3 — SLR DERIVATION FROM FIRST PRINCIPLES
+==============================================================================
+
+Model: ŷᵢ = m·xᵢ + c.  Objective:
+
+    SSE(m, c) = Σᵢ (yᵢ - m·xᵢ - c)²
+
+SSE is a quadratic bowl in (m, c), so the stationary point is the global
+minimum. Take partial derivatives:
+
+    ∂SSE/∂c = Σᵢ 2(yᵢ - m·xᵢ - c)(-1) = -2 Σᵢ (yᵢ - m·xᵢ - c)
+    ∂SSE/∂m = Σᵢ 2(yᵢ - m·xᵢ - c)(-xᵢ) = -2 Σᵢ xᵢ(yᵢ - m·xᵢ - c)
+
+Setting both to zero gives the two normal equations:
+
+    (1)  Σᵢ yᵢ   = m Σᵢ xᵢ  + n·c
+    (2)  Σᵢ xᵢyᵢ = m Σᵢ xᵢ² + c Σᵢ xᵢ
+
+Step 1 — solve (1) for c. Divide by n:
+
+    ȳ = m·x̄ + c        ⇒     c = ȳ - m·x̄
+
+Two things fall out of this single line, and both are worth stating in an
+interview:
+  - The fitted line always passes through the centroid (x̄, ȳ).
+  - Because ∂SSE/∂c = 0 is literally Σeᵢ = 0, the residuals of an
+    intercept-containing OLS fit sum to zero by construction. So "residuals
+    have mean zero" is not an assumption you can test — it is an algebraic
+    identity. (What you DO test is that residuals have zero mean *conditional
+    on x*, i.e. no pattern in the residual plot.)
+
+Step 2 — substitute c into (2):
+
+    Σ xᵢyᵢ = m Σ xᵢ² + (ȳ - m·x̄) Σ xᵢ
+           = m Σ xᵢ² + n·x̄·ȳ - m·n·x̄²      (using Σxᵢ = n·x̄)
+
+    Σ xᵢyᵢ - n·x̄·ȳ = m (Σ xᵢ² - n·x̄²)
+
+Both sides are recognizable centered sums:
+
+    S_xy = Σ (xᵢ - x̄)(yᵢ - ȳ) = Σ xᵢyᵢ - n·x̄·ȳ
+    S_xx = Σ (xᵢ - x̄)²         = Σ xᵢ²  - n·x̄²
+
+(Quick proof of the second: Σ(xᵢ - x̄)² = Σxᵢ² - 2x̄Σxᵢ + n·x̄²
+ = Σxᵢ² - 2n·x̄² + n·x̄² = Σxᵢ² - n·x̄².)
+
+Therefore the closed-form solution:
+
+    ┌──────────────────────────────────────────────┐
+    │  m = S_xy / S_xx    =  Cov(x, y) / Var(x)    │
+    │  c = ȳ - m·x̄                                 │
+    └──────────────────────────────────────────────┘
+
+Three readings of the slope, all the same formula:
+
+    m = Cov(x,y) / Var(x)                    covariance scaled by input spread
+      = r_xy · (s_y / s_x)                   correlation rescaled to y-units
+      = Σ wᵢ yᵢ ,  wᵢ = (xᵢ - x̄)/S_xx        a weighted average of the y's
+                                             (this last form is what makes
+                                              unbiasedness in Part 9 obvious)
+
+The r_xy·(s_y/s_x) form explains a classic gotcha: correlation is symmetric in
+x and y, but the regression slope is not. Regressing y on x gives r·(s_y/s_x);
+regressing x on y gives r·(s_x/s_y). These are reciprocals only when r = ±1.
+Hence "regression toward the mean" — the standardized slope is r, which is
+always ≤ 1 in magnitude.
+
+Degenerate case: S_xx = 0 means every xᵢ equals x̄, i.e. x is constant. The
+slope is 0/0 — undefined, because a vertical strip of points has no unique
+line through it. This is why the scratch code guards the denominator with
+np.isclose before dividing.
+
+Second-order check (that this is a minimum, not a saddle). The Hessian is
+
+    H = 2 · [ Σxᵢ²   Σxᵢ ]
+            [ Σxᵢ     n  ]
+
+    det(H) = 4(n Σxᵢ² - (Σxᵢ)²) = 4n · S_xx ≥ 0,   trace > 0
+
+so H is positive semi-definite, and positive definite whenever S_xx > 0.
+Stationary point ⇒ global minimum. This generalizes in Part 4.
+
+
+PART 4 — MLR DERIVATION (MATRIX FORM)
+==============================================================================
+
+Objective, expanded:
+
+    SSE(β) = ||y - Xβ||²
+           = (y - Xβ)ᵀ(y - Xβ)
+           = yᵀy - yᵀXβ - βᵀXᵀy + βᵀXᵀXβ
+           = yᵀy - 2βᵀXᵀy + βᵀXᵀXβ
+
+(The two middle terms combine because yᵀXβ is a 1×1 scalar, so it equals its
+own transpose βᵀXᵀy.)
+
+Matrix calculus facts used:
+
+    ∂(aᵀβ)/∂β   = a
+    ∂(βᵀAβ)/∂β  = 2Aβ      when A is symmetric  (XᵀX always is)
+
+Gradient:
+
+    ∇SSE(β) = -2Xᵀy + 2XᵀXβ
+
+Set to zero → the normal equations:
+
+    ┌──────────────────────┐
+    │   XᵀX β̂ = Xᵀ y       │      ← memorize THIS, not the inverse
+    └──────────────────────┘
+
+and if XᵀX is invertible:
+
+    ┌──────────────────────────┐
+    │   β̂ = (XᵀX)⁻¹ Xᵀ y      │
+    └──────────────────────────┘
+
+Sanity check that this contains Part 3. With d = 1 and an intercept column,
+
+    XᵀX = [ n     Σxᵢ  ]        Xᵀy = [ Σyᵢ   ]
+          [ Σxᵢ   Σxᵢ² ]              [ Σxᵢyᵢ ]
+
+Inverting the 2×2 and multiplying out reproduces m = S_xy/S_xx, c = ȳ - m·x̄
+exactly. SLR is not a different algorithm; it is this formula at d = 1.
+
+Hessian and convexity:
+
+    ∇²SSE(β) = 2XᵀX
+
+For any v: vᵀ(XᵀX)v = ||Xv||² ≥ 0, so XᵀX is always positive semi-definite and
+SSE is always convex — no local minima, ever. It is *strictly* convex (unique
+minimizer) iff ||Xv||² > 0 for all v ≠ 0, i.e. iff X has full column rank.
+This single condition is the pivot for Part 6.
+
+Never literally invert. (XᵀX)⁻¹ is the notation, not the algorithm. Forming
+and inverting XᵀX squares the condition number of X, so it loses roughly twice
+as many digits of precision as it needs to. In practice:
+    - solve XᵀXβ = Xᵀy via Cholesky (XᵀX is SPD) — fastest, moderate stability
+    - or solve min||y - Xβ|| via QR of X — the standard, better conditioned
+    - or via SVD / pseudo-inverse — slowest, most robust, handles rank
+      deficiency gracefully
+NumPy's np.linalg.lstsq and scikit-learn's LinearRegression both use an
+SVD-based path, which is why they return an answer even on collinear data
+where np.linalg.inv(X.T @ X) would blow up. Use np.linalg.solve or lstsq, not
+inv, in any implementation you would show an interviewer.
+
+
+PART 5 — THE GEOMETRY: OLS IS A PROJECTION
+==============================================================================
+
+This is the view that makes the algebra feel inevitable.
+
+The set of achievable predictions {Xβ : β ∈ ℝ^d} is the column space of X — a
+d-dimensional subspace of ℝ^n. y generally does not lie in it. Minimizing
+||y - Xβ|| means finding the point in col(X) closest to y, which is the
+orthogonal projection of y onto col(X).
+
+Orthogonality condition: the residual must be perpendicular to the subspace:
+
+    Xᵀ(y - Xβ̂) = 0     ⇔     XᵀXβ̂ = Xᵀy
+
+The normal equations ARE the statement "residuals are orthogonal to every
+column of X" — the word "normal" means "perpendicular". You can derive OLS
+from this one geometric line with no calculus at all.
+
+The hat matrix:
+
+    ŷ = Xβ̂ = X(XᵀX)⁻¹Xᵀ y = H y
+
+H "puts the hat on y". Its properties are used all over diagnostics:
+
+    Hᵀ = H            symmetric
+    H² = H            idempotent — projecting twice changes nothing
+    trace(H) = d      = number of fitted parameters (= effective d.o.f.)
+    residuals e = (I - H)y, and (I - H) is also a projection (onto the
+                  orthogonal complement), so e ⊥ ŷ
+    hᵢᵢ = leverage of point i — how far xᵢ is from the centre of the feature
+          cloud. High leverage + large residual = an influential point that is
+          bending the fit (see Cook's distance in assumptions.txt).
+
+Two consequences worth naming:
+
+Sum-of-squares decomposition. Because e ⊥ ŷ, Pythagoras applies:
+
+    Σ(yᵢ - ȳ)² = Σ(ŷᵢ - ȳ)² + Σ(yᵢ - ŷᵢ)²
+       TSS     =     ESS     +      RSS
+
+R² = ESS/TSS = 1 - RSS/TSS follows directly, and its "share of variance
+explained" interpretation is valid *only* because of this orthogonality —
+which is why it requires an intercept in the model. Details in
+evaluation_metrics.txt.
+
+Why adding a feature can never increase training RSS. A new column enlarges
+col(X), and the distance from a point to a larger subspace cannot grow. So
+training R² is monotone non-decreasing in d, even for a column of pure noise.
+This is exactly the reason adjusted R² exists and the reason training R² is
+useless for model selection.
+
+
+PART 6 — WHEN XᵀX IS SINGULAR
+==============================================================================
+
+XᵀX is invertible ⇔ X has full column rank ⇔ no feature is an exact linear
+combination of the others. It fails in three practical situations:
+
+1. d > n (more features than observations, e.g. genomics, text). rank(X) ≤ n
+   < d, so XᵀX is always singular. Infinitely many β achieve zero training
+   error — the fit is not identified.
+
+2. Exact collinearity. Duplicated columns; a feature repeated in different
+   units (metres and centimetres); or the dummy-variable trap — one-hot
+   encoding a k-level category into all k dummies while also keeping an
+   intercept, so the dummies sum to the intercept column. Fix: drop one level
+   (drop_first=True) or drop the intercept.
+
+3. A constant column (other than the intercept) — zero variance, so it is a
+   multiple of the intercept column.
+
+Near-singular is the more common and more insidious case: features that are
+strongly but not perfectly correlated. Then XᵀX is technically invertible but
+badly conditioned, and the consequence shows up in the coefficient variance
+formula from Part 9:
+
+    Var(β̂ⱼ) = σ² / ( S_jj · (1 - R²ⱼ) ) ,   R²ⱼ = R² of regressing xⱼ on the
+                                             other features
+    VIFⱼ = 1 / (1 - R²ⱼ)
+
+As R²ⱼ → 1, Var(β̂ⱼ) explodes. Symptoms: huge standard errors, coefficients
+that flip sign when you add one more row of data, individually insignificant
+coefficients despite a high overall F-statistic and good R².
+
+The crucial nuance: multicollinearity damages the *individual coefficients*,
+not the *predictions*. ŷ is the projection onto col(X), which is unchanged by
+how you parameterize that space. So if you only need forecasts, collinearity
+is largely harmless; if you need to interpret "the effect of x₃ holding
+everything else fixed", it is fatal — and interviewers ask precisely that
+distinction.
+
+Fixes, in rough order of preference:
+    - Drop or merge redundant features (highest VIF first, refit, repeat)
+    - Ridge (Part 8) — makes the system invertible by construction
+    - PCA / PLS on the feature block, then regress on components
+    - Use the pseudo-inverse β̂ = X⁺y, which returns the minimum-norm solution
+      among all least-squares solutions (this is what lstsq does)
+    - Collect more data — sometimes collinearity is an artifact of a small,
+      unlucky sample
+
+
+PART 7 — GRADIENT DESCENT
+==============================================================================
+
+Objective and gradient (with the 1/(2n) convention):
+
+    J(β) = (1/(2n)) ||Xβ - y||²
+    ∇J(β) = (1/n) Xᵀ(Xβ - y)
+
+Update:
+
+    β ← β - α · (1/n) Xᵀ(Xβ - y)
+
+In scalar SLR form, using J = (1/n)Σ(yᵢ - m·xᵢ - c)²:
+
+    ∂J/∂m = (-2/n) Σ xᵢ (yᵢ - m·xᵢ - c)
+    ∂J/∂c = (-2/n) Σ (yᵢ - m·xᵢ - c)
+
+    m ← m - α · ∂J/∂m
+    c ← c - α · ∂J/∂c
+
+Implementation detail that trips people up: update m and c SIMULTANEOUSLY from
+the same residual vector. Overwriting m and then using the new m to compute
+the c gradient is a different (and wrong) algorithm.
+
+Why bother, given the closed form exists?
+    - Cost: normal equation is O(nd² + d³); one GD step is O(nd). For large d
+      (thousands+) GD wins decisively.
+    - Memory: SGD / mini-batch never needs all of X resident, so it streams
+      data that does not fit in RAM, and supports online / incremental fitting.
+    - Generality: no closed form exists for L1 (Lasso), logistic regression,
+      SVMs, or neural nets. Gradient methods are the one optimizer that
+      transfers to all of them — which is the real reason to derive it here.
+
+Convergence guarantees. J is convex with Hessian (1/n)XᵀX, so GD converges to
+the global optimum for any fixed step size
+
+    0 < α < 2 / L,     L = λ_max((1/n)XᵀX)     (Lipschitz constant of ∇J)
+
+and the linear rate depends on the condition number κ = λ_max/λ_min of XᵀX:
+error shrinks per step roughly like ((κ-1)/(κ+1))². Ill-conditioned ⇒ the loss
+surface is a long narrow valley ⇒ GD zig-zags and crawls.
+
+Why feature scaling is mandatory for GD but irrelevant for OLS. Scaling
+changes κ. With x₁ ∈ [0, 1] and x₂ ∈ [0, 10⁶], the valley is absurdly
+elongated: any α small enough to be stable in the steep direction is far too
+small to make progress in the flat one. Standardizing to zero mean / unit
+variance makes the contours roughly circular and GD converges in a fraction of
+the steps. The closed-form solution, by contrast, is exact regardless of
+scaling — it solves the system in one shot rather than walking the surface. So
+"do I need to scale?" has answer *no* for fit_ols and *yes* for fit_gd.
+(Caveat: with regularization, scaling matters even in closed form — Part 8.)
+
+Variants:
+    Batch GD      — full X each step. Smooth, exact gradient, slow per step.
+    SGD           — one sample per step. Noisy path, cheap steps, needs a
+                    decaying learning rate to settle; the noise itself is a
+                    mild regularizer.
+    Mini-batch    — the practical default (32–512). Vectorizes well, noise is
+                    tolerable.
+    Momentum/Adam — reshape the effective step per direction, which is how
+                    modern optimizers survive bad conditioning.
+
+Diverging (loss → inf or NaN) means α is too large — usually because features
+were not scaled. Plot J per iteration: it must decrease monotonically for
+batch GD. If it does not, the learning rate, not the model, is wrong.
+
+
+PART 8 — REGULARIZED CLOSED FORMS
+==============================================================================
+
+Ridge (L2). Penalize squared coefficient magnitude:
+
+    J(β) = ||y - Xβ||² + λ||β||²
+
+    ∇J = -2Xᵀ(y - Xβ) + 2λβ = 0
+
+    ┌───────────────────────────────────┐
+    │   β̂_ridge = (XᵀX + λI)⁻¹ Xᵀ y     │
+    └───────────────────────────────────┘
+
+Note what λI does: XᵀX is PSD, so XᵀX + λI has eigenvalues (λᵢ + λ) > 0 for
+λ > 0 — it is always positive definite, hence always invertible. Ridge solves
+the singularity problem of Part 6 by construction, which is also why it is
+numerically the well-behaved choice under multicollinearity. In SVD terms,
+with X = UΣVᵀ, ridge shrinks the contribution of each singular direction by
+σⱼ²/(σⱼ² + λ): directions with tiny σⱼ (the unstable ones) are damped hardest.
+
+Two practical points: do NOT penalize the intercept (shifting y should not be
+penalized), and DO standardize features first — the penalty ||β||² is not
+scale-invariant, so unscaled features get arbitrarily unequal penalties.
+
+Lasso (L1):
+
+    J(β) = ||y - Xβ||² + λ||β||₁
+
+|β| is not differentiable at 0, so there is no closed form. Solved by
+coordinate descent, LARS, or proximal/subgradient methods. Because the L1
+constraint region has corners on the axes, the optimum often lands exactly on
+one — giving sparse solutions and thus feature selection. Ridge shrinks
+coefficients toward zero smoothly but almost never to exactly zero.
+
+Elastic Net combines both: λ₁||β||₁ + λ₂||β||₂², which keeps sparsity while
+handling groups of correlated features more gracefully than pure Lasso (which
+tends to pick one of a correlated group arbitrarily).
+
+Both are bias-variance trades: λ > 0 introduces bias in exchange for a
+variance reduction, so a biased estimator beats OLS in test MSE whenever OLS
+variance is the dominant error term (small n, large d, collinear features).
+This is where OLS's Gauss-Markov optimality (Part 9) stops being decisive —
+BLUE only ranks *unbiased* estimators, and ridge deliberately leaves that
+class. See ../../regularization_concept.txt and ../../bias_variance.txt.
+
+
+PART 9 — STATISTICAL PROPERTIES OF β̂
+==============================================================================
+
+Assume y = Xβ + ε with E[ε] = 0, Cov(ε) = σ²I, and X fixed / full rank.
+
+Unbiasedness:
+
+    β̂ = (XᵀX)⁻¹Xᵀy = (XᵀX)⁻¹Xᵀ(Xβ + ε) = β + (XᵀX)⁻¹Xᵀε
+    E[β̂] = β + (XᵀX)⁻¹Xᵀ·E[ε] = β
+
+Note what this needs: only E[ε] = 0 (exogeneity). Not normality, not constant
+variance. Correlated or heteroscedastic errors leave β̂ unbiased — they break
+the *standard errors*, not the point estimate. That distinction is a very
+common interview question, and it is why heteroscedasticity is usually treated
+with robust (Huber-White) standard errors rather than by abandoning OLS.
+
+Variance:
+
+    Cov(β̂) = (XᵀX)⁻¹Xᵀ · Cov(ε) · X(XᵀX)⁻¹ = σ²(XᵀX)⁻¹
+
+and per coefficient, as used in Part 6:
+
+    Var(β̂ⱼ) = σ² / (S_jj (1 - R²ⱼ))
+
+Read off the three levers on precision: more noise (σ²) hurts; more spread in
+xⱼ (S_jj, which grows with n) helps; collinearity with other features (R²ⱼ)
+hurts. In SLR this reduces to the clean pair
+
+    Var(m̂) = σ² / S_xx        Var(ĉ) = σ² (1/n + x̄²/S_xx)
+
+Estimating σ²:
+
+    σ̂² = RSS / (n - d - 1)
+
+The denominator is degrees of freedom, not n: we spent d+1 d.o.f. fitting
+parameters (equivalently trace(H) = d+1 from Part 5), and dividing by n gives
+a downward-biased estimate. n - d - 1 makes it unbiased.
+
+Gauss-Markov theorem. Under linearity, exogeneity, homoscedasticity, and no
+autocorrelation, OLS is BLUE — the Best (minimum-variance) Linear Unbiased
+Estimator. Read the qualifiers carefully, because that is where the follow-up
+lands:
+    - "Linear" — only among estimators linear in y. Nonlinear estimators can
+      beat it.
+    - "Unbiased" — only among unbiased ones. Ridge is biased and often has
+      lower MSE.
+    - Normality is NOT required for BLUE. Normality buys you exact t and F
+      distributions for inference in small samples; with large n the CLT gives
+      those approximately anyway.
+
+Adding normality (ε ~ N(0, σ²I)) gives β̂ ~ N(β, σ²(XᵀX)⁻¹), hence
+
+    t-test per coefficient: tⱼ = β̂ⱼ / SE(β̂ⱼ) ~ t_(n-d-1)
+    F-test for the whole model / nested model comparison
+
+with the usual caution that a coefficient's significance depends on which
+other features are in the model.
+
+
+PART 10 — COST AND METHOD SELECTION
+==============================================================================
+
+    Method              Time                    Notes
+    ------------------  ----------------------  ----------------------------
+    Normal eq (inv)     O(nd² + d³)             exact; unstable; don't
+    Cholesky solve      O(nd² + d³/3)           exact; needs XᵀX pos. def.
+    QR                  O(nd²)                  exact; the standard workhorse
+    SVD / pinv          O(nd²) larger const     exact; handles rank deficiency
+    Batch GD            O(nd) per iteration     needs scaling + α tuning
+    SGD / mini-batch    O(d) per sample         streams data; online updates
+
+Rules of thumb:
+    - d up to a few thousand and X fits in memory → closed form via QR/SVD
+      (lstsq). One shot, no hyperparameters, exact.
+    - d very large, n huge, or streaming → mini-batch SGD.
+    - Rank-deficient / heavily collinear → ridge, or pinv for minimum-norm.
+    - Need L1 sparsity → coordinate descent (no closed form exists).
+    - Wildly different feature scales and you are using any iterative method
+      or any penalty → standardize first.
+
+
+PART 11 — INTERVIEW-READY ONE-LINERS
+==============================================================================
+
+- Closed form: β̂ = (XᵀX)⁻¹Xᵀy, from setting ∇||y - Xβ||² = 0. State it as
+  XᵀXβ̂ = Xᵀy and add that you would solve, not invert.
+- SLR: m = Cov(x,y)/Var(x) = r·(s_y/s_x), c = ȳ - m·x̄. The line passes through
+  (x̄, ȳ).
+- Geometrically, OLS orthogonally projects y onto col(X); H = X(XᵀX)⁻¹Xᵀ is
+  that projection, and "normal equations" literally means "residual ⊥ columns".
+- SSE is convex because its Hessian 2XᵀX is PSD — one global minimum, no local
+  minima. Strictly convex ⇔ X full column rank ⇔ unique β̂.
+- OLS = MLE under Gaussian noise; MAE = MLE under Laplace noise. Squared error
+  targets the conditional mean, absolute error the conditional median.
+- XᵀX singular ⇔ perfect collinearity or d > n. Ridge fixes it because
+  XᵀX + λI is always PD.
+- Multicollinearity inflates coefficient variance (VIF = 1/(1-R²ⱼ)) but does
+  not harm predictions — it harms interpretation.
+- Heteroscedasticity and autocorrelation leave β̂ unbiased; they invalidate the
+  standard errors. Use robust SEs.
+- Gauss-Markov: OLS is BLUE — minimum variance among LINEAR UNBIASED
+  estimators. Normality is not needed for BLUE, only for exact small-sample
+  inference.
+- Adding any feature can only decrease training RSS (the column space grows),
+  so training R² never falls — hence adjusted R² and validation sets.
+- Scaling is irrelevant for closed-form OLS, mandatory for gradient descent
+  (it fixes the condition number) and for any penalized fit (the penalty is
+  not scale-invariant).
+- Gradient descent's real justification is not speed on this problem — it is
+  that it is the one method that also fits logistic regression, SVMs, and
+  neural nets, none of which have a closed form.

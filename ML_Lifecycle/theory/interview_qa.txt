@@ -1,0 +1,410 @@
+ML LIFECYCLE: INTERVIEW Q&A (MODEL-AGNOSTIC)
+================================================================================
+
+This is the ML-system-design and ML-judgement half of a Senior MLE loop. The
+algorithm-specific Q&A lives in each topic folder. Underlying detail for
+everything here is in the numbered files in this directory.
+
+--------------------------------------------------------------------------------
+STAGE 1: PROBLEM FRAMING
+--------------------------------------------------------------------------------
+
+Q: A product manager says "build a model to reduce churn." What do you ask
+   before writing any code?
+A: Four things. What decision the prediction feeds (who gets a retention offer,
+   and how many offers can we afford?), the entity and prediction time (which
+   users, scored when?), how the label is defined and when it matures (cancelled
+   within 30 days -> labels are 30 days late), and the constraints (latency,
+   interpretability, budget). The answers usually reframe the problem: a fixed
+   offer budget turns it from classification into ranking under a budget, so the
+   metric becomes precision@k or lift@k, not accuracy. I would also flag early
+   that if we want to know who to TARGET rather than who will leave, this is an
+   uplift problem, not a prediction problem.
+   Follow-up an interviewer may ask: why is the top-k of a churn model different
+   from the top-k of an uplift model?
+
+Q: How do you connect an ML metric to a business KPI?
+A: Three layers: the business KPI (retained revenue), a product proxy (offer
+   acceptance rate), and the ML metric (PR-AUC). Before modelling I write the
+   assumed chain, e.g. +0.02 PR-AUC -> +1.5pp precision@5k -> ~180 extra saves
+   per month -> X revenue. If I cannot write that chain, the ML metric is
+   unanchored and optimising it is faith-based. I also define guardrail metrics
+   that must not degrade, and I expect the offline/online gap to be information
+   about the framing rather than noise.
+
+Q: When should you NOT use machine learning?
+A: When the mapping is a known deterministic policy, when you have a few hundred
+   examples, when errors are unacceptable rather than merely costly, when a
+   simple heuristic already captures most of the value, or when nothing downstream
+   can act on the prediction. Also when you cannot observe ground truth at all -
+   without labels or a proxy you cannot improve or even measure the system.
+
+Q: What is a feedback loop and why does it matter at framing time?
+A: The deployed model changes the data it will be trained on next. A fraud model
+   blocks transactions so you never learn whether they were fraudulent; a churn
+   model saves the users it flagged so it looks wrong exactly where it was right.
+   Mitigations have to be designed in up front: a permanent random holdout that
+   bypasses the model, logging score + decision + policy version so you can
+   reweight later, and some exploration. If you ask "how would you know the model
+   works in production", the answer is the holdout or the A/B test, not the AUC.
+
+--------------------------------------------------------------------------------
+STAGE 2-3: DATA, EDA, QUALITY
+--------------------------------------------------------------------------------
+
+Q: What is point-in-time correctness and why is it hard?
+A: Every feature for a row scored at time t must be computed only from data
+   available strictly before t, and the label only from after t. It is hard
+   because production databases are mutable - if user.plan is updated in place,
+   the historical value is gone, and joining today's dimension table onto
+   historical events silently injects the future. The fixes are CDC or snapshot
+   tables, event-time windowed aggregations, as-of joins, and keeping both
+   event_time and ingest_time so you can reconstruct what you knew at t.
+
+Q: What is training/serving skew and how do you eliminate it?
+A: Features computed one way for training (batch SQL) and another way for
+   serving (streaming Java) diverge, so the model sees different inputs in
+   production than it was trained on. Three structural fixes: one implementation
+   with two runners, a feature store materialising one definition to both offline
+   and online stores, or log-and-train - log the exact feature vector used at
+   serving time and train on those logs, which makes skew impossible by
+   construction.
+
+Q: Missing values - how do you decide what to do?
+A: First classify the mechanism. MCAR: dropping is safe but wasteful. MAR
+   (depends on observed features): conditional/model-based imputation is
+   principled. MNAR (depends on the unobserved value itself, e.g. high earners
+   hiding income): no imputation recovers it, so keep the missingness as a
+   signal. In practice I almost always add an is_missing indicator, compare the
+   target rate for missing versus present (a big gap hints at MNAR or leakage),
+   and fit imputers inside the CV fold on training data only.
+
+Q: What is multicollinearity, how do you detect it, and does it matter?
+A: One feature is nearly a linear combination of others, so X^T X is near
+   singular. Detect with a correlation matrix (pairwise only), VIF = 1/(1-R_j^2)
+   with >5 suspicious and >10 severe (catches multi-way), or the condition
+   number. It inflates coefficient variance, so signs flip between refits and
+   coefficients are uninterpretable - but PREDICTION is usually fine as long as
+   the collinearity structure holds at serving time. So it matters for inference
+   and stability, not accuracy. Ridge is the canonical fix because it shrinks
+   correlated coefficients together.
+
+Q: You get 0.99 AUC on your first model. What do you do?
+A: Assume leakage until proven otherwise. Check for a single feature with
+   near-perfect AUC on its own; look for names like final_, total_, status,
+   reason, refund; check whether the feature's null rate differs by class; verify
+   the split is not random over time-ordered or grouped data; check for duplicate
+   entities across train and test; and confirm no preprocessing statistic was
+   fitted before the split. The test for each suspect feature is: would this
+   value have existed, with this value, one second before prediction time?
+
+--------------------------------------------------------------------------------
+STAGE 4: SPLITTING AND VALIDATION
+--------------------------------------------------------------------------------
+
+Q: How do you choose a splitting strategy?
+A: Ask what the model must generalise ACROSS at serving time and split along
+   exactly that axis. New rows from the same population -> random. Future periods
+   -> time-based. New users/patients/devices -> group split. Rare classes ->
+   stratified. Most real systems need grouped plus temporal. A random split on
+   temporal or grouped data is the classic disaster because the model memorises
+   entity quirks or peeks at the future.
+
+Q: Name the ways preprocessing leaks.
+A: Scaler statistics, imputation values, target encoding, feature selection,
+   and resampling/SMOTE all applied before the split or outside the fold.
+   Target encoding is the worst because it injects the label directly. Feature
+   selection is the sneakiest because it never touches a label at fit time but
+   the selection itself used the labels of the whole dataset. The structural fix
+   is to put every transform in a Pipeline and fit the Pipeline inside the CV
+   loop, so leakage is impossible rather than merely forbidden.
+
+Q: Why is random search usually better than grid search?
+A: Hyperparameter importance is very unequal - typically two or three parameters
+   dominate. With n trials, grid search over k parameters tries only n^(1/k)
+   distinct values per parameter, while random search tries n distinct values of
+   every parameter. So for the same budget random search explores the important
+   axes far more densely. Use log-uniform sampling for scale parameters, and move
+   to Bayesian optimisation or Hyperband when each training run is expensive.
+
+Q: What is nested cross-validation and when do you need it?
+A: An inner loop tunes hyperparameters and an outer loop estimates
+   generalisation, with tuning repeated independently inside each outer fold. You
+   need it when the reported performance estimate must be unbiased for a tuned
+   model - a single CV loop that both selects and reports is optimistically
+   biased because selection fits the validation folds. In industry a clean,
+   touched-once held-out test set usually plays the role of the outer loop; nested
+   CV matters most on small data and in regulated or published work.
+
+Q: Your validation score improved by 0.3 points. Ship it?
+A: Not on that alone. I would bootstrap the test set for a confidence interval,
+   check whether 0.3 is inside the noise band, use a paired test (McNemar for two
+   classifiers on the same test set), check per-slice results, count how many
+   experiments have already been run against this validation set (selection
+   optimism grows with the number of comparisons), and confirm the change is
+   worth its operational cost. Then a shadow or canary deploy, and an A/B test to
+   see whether the business metric actually moves.
+
+--------------------------------------------------------------------------------
+STAGES 5-6: MODELLING AND TUNING
+--------------------------------------------------------------------------------
+
+Q: Why start with a baseline?
+A: It defines what "better" means and it validates the plumbing end to end. Three
+   tiers: the trivial predictor (majority class / mean / last value), the existing
+   business heuristic, and a simple regularised model. An improvement stated
+   without these is meaningless - 90% accuracy is just a restatement of the base
+   rate. And an implausibly good baseline immediately exposes a broken split or a
+   broken metric, for free.
+
+Q: Tabular problem, one million rows. Which model and why?
+A: Gradient boosted trees, almost certainly - they handle mixed types, missing
+   values, monotone constraints, and interactions with little preprocessing, and
+   they remain the state of the art on tabular data. I would still fit a
+   regularised logistic/linear model first to see whether the problem is basically
+   linear and to get a naturally calibrated reference, and I would only consider a
+   deep model for multi-modal inputs, very large data, or a shared-representation
+   requirement - not for a few points of AUC.
+
+Q: Your model underfits. Your model overfits. What do you do in each case?
+A: Underfitting (train error already high): more capacity, better features, less
+   regularisation, longer training - and first check that the model can overfit
+   100 rows to near-zero loss, because if it cannot, this is a bug, not a
+   modelling problem. Overfitting (train much better than validation): more data,
+   more regularisation, simpler model, early stopping, augmentation. The learning
+   curve decides between "get more data" and "get a better model": if validation
+   is still improving with size, collect data; if the curves have converged at a
+   poor level, more data will not help.
+
+Q: What is the one-standard-error rule and why use it?
+A: After cross-validation, instead of taking the configuration with the best mean
+   score, take the simplest configuration whose score is within one standard error
+   of the best. With many trials and a noisy validation metric, the winner is
+   partly the luckiest configuration; the rule buys robustness and usually a
+   simpler model at negligible cost.
+
+--------------------------------------------------------------------------------
+STAGE 7: EVALUATION, INTERPRETABILITY, FAIRNESS
+--------------------------------------------------------------------------------
+
+Q: ROC-AUC vs PR-AUC?
+A: ROC-AUC is the probability a random positive is scored above a random
+   negative - pure ranking quality, invariant to class balance. That invariance is
+   its weakness under heavy imbalance: FPR has an enormous true-negative
+   denominator, so thousands of false positives barely move the curve and a 0.95
+   ROC-AUC model can be operationally useless. PR-AUC focuses on the positive
+   class and reflects precision at realistic operating points, but its baseline is
+   the prevalence, so it is not comparable across datasets with different base
+   rates. Rare positives and you care about the flagged set -> PR-AUC.
+
+Q: How do you choose the classification threshold?
+A: From the cost matrix, not from 0.5. For calibrated probabilities the
+   cost-minimising threshold is t* = C_FP / (C_FP + C_FN), so if a miss costs 10x
+   a false alarm, t* is about 0.09. Alternatives are a capacity constraint (k
+   alerts per day) or a target precision. The threshold is a deployment parameter
+   - set it on validation, verify on test, store it as config so it can change
+   without retraining. Note the prerequisite: the cost formula only works if the
+   probabilities are calibrated.
+
+Q: What is calibration, who needs it, and how do you fix it?
+A: A model is calibrated if among predictions of 0.7, about 70% are positive.
+   Calibration and ranking are independent - recalibrating never changes AUC. You
+   need it whenever the probability itself feeds a decision: expected value,
+   pricing, cost-derived thresholds, or a number shown to a human. Measure with a
+   reliability diagram, ECE, and the Brier score (a proper scoring rule). Fix with
+   Platt scaling (parametric, small data), isotonic regression (flexible, needs a
+   few thousand points), or temperature scaling for neural nets - always fitted on
+   a held-out calibration set. Boosted trees and deep nets are overconfident;
+   Naive Bayes is extremely so; anything trained with resampling or class weights
+   is miscalibrated by construction.
+
+Q: SHAP vs LIME.
+A: Both are local, post-hoc, model-agnostic. LIME fits a sparse linear surrogate
+   on perturbations weighted by proximity: cheap and intuitive, but unstable
+   across runs, sensitive to the kernel width, and with no fidelity guarantee.
+   SHAP computes Shapley values - the average marginal contribution over all
+   feature orderings - and is the unique attribution satisfying local accuracy,
+   missingness and consistency; TreeSHAP makes it exact and fast for tree
+   ensembles. I default to SHAP for tabular work. Both share the fundamental
+   caveat: they explain the MODEL, not the world. If the model learned a spurious
+   correlation, SHAP faithfully explains the spurious correlation. Correlated
+   features also split credit, so low attribution does not mean unimportant.
+
+Q: What is wrong with a partial dependence plot?
+A: Two things. It assumes the plotted feature is independent of the others, so it
+   averages the model over combinations that cannot occur (2m tall and 40kg). And
+   it is an average, so opposite effects in two subgroups cancel into a flat line
+   for a highly influential feature. Fix the second by plotting ICE curves
+   alongside; fix the first by using ALE, which uses local differences within
+   small intervals and is unbiased under correlation.
+
+Q: What is slice analysis and why does the aggregate metric hide problems?
+A: The aggregate is dominated by the majority slice, so a model can improve
+   overall and get worse for every high-value segment - Simpson's paradox is
+   routine when slice sizes differ. I enumerate slices from domain knowledge,
+   compute the metric per slice with size and a confidence interval, rank by
+   size times gap, and put per-slice acceptance gates in CI so a release that
+   breaks a critical slice fails. And I control for multiple comparisons: search
+   500 slices and some fail by chance, so I require a failure to reproduce.
+
+Q: Can a model be fair by every definition at once?
+A: No, and this is arithmetic, not engineering. When base rates genuinely differ
+   between groups and the classifier is imperfect, calibration within groups,
+   equal false positive rates and equal false negative rates cannot all hold -
+   the Kleinberg et al. / Chouldechova impossibility result. That is exactly the
+   COMPAS dispute: the tool was calibrated and its error rates differed by race,
+   both true simultaneously. So fairness is a choice about which error to
+   distribute, made with domain experts, legal and affected stakeholders - not a
+   library setting. In practice I pick a definition tied to the harm (equal
+   opportunity when the positive outcome is a benefit, equalised odds when false
+   positives also harm), measure per group including intersections, and prefer
+   fixing the label-generation process over post-hoc threshold surgery.
+
+Q: You cannot use a protected attribute as a feature. Are you done?
+A: No. Proxies - postcode, device, name-derived features, browsing history -
+   encode it anyway, so removing the attribute removes your ability to MEASURE
+   the disparity while leaving the disparity intact. I keep the attribute in an
+   evaluation-only, access-controlled table so I can audit, and I look upstream:
+   historical bias in the labels, representation bias, and measurement bias
+   (where the proxy label means different things across groups) are the usual
+   real sources.
+
+--------------------------------------------------------------------------------
+STAGES 8-9: DEPLOYMENT AND MLOPS
+--------------------------------------------------------------------------------
+
+Q: Batch or real-time serving - how do you decide?
+A: By how fast the input changes and how fast the decision must be made. If the
+   prediction depends only on state that changes slowly, precompute in batch and
+   serve from a table: cheapest, simplest, no latency risk, easy to backfill and
+   audit. Go real-time when the features depend on the request itself (this
+   transaction, this query) or when staleness of minutes is unacceptable.
+   Real-time buys freshness and costs you an SLO, a feature store, and an on-call
+   rotation.
+
+Q: Difference between shadow deployment, canary and A/B test?
+A: Shadow sends real traffic to the new model and logs predictions without acting
+   on them - it validates infrastructure, latency and prediction distribution at
+   zero user risk, but it cannot measure business impact because no decision
+   changed. Canary routes a small fraction of real decisions to the new model with
+   automatic rollback, limiting blast radius. An A/B test randomises users between
+   models and measures the business KPI with a proper statistical test - the only
+   way to establish impact. The usual order is shadow, canary, A/B.
+
+Q: Your offline metric improved but the A/B test shows no lift. What happened?
+A: Candidate explanations, roughly in order: the offline metric is not the
+   decision metric (better ranking on a metric nobody acts on); training/serving
+   skew, so the production model does not see what you evaluated; the improvement
+   is inside the noise band and the test is underpowered; the gain lives in a
+   slice with no business value; a feedback loop means the old model already
+   captured the easy wins; latency regression cancelled the quality gain; or the
+   offline evaluation leaked. I would check skew and metric definition first
+   because they are the most common and the easiest to verify from logs.
+
+Q: Data drift vs concept drift.
+A: Data (covariate) drift is P(X) changing with P(y|X) fixed - a new user
+   segment; the learned relationship still holds and degradation is often modest.
+   Concept drift is P(y|X) changing - the same inputs now imply a different
+   outcome, e.g. fraudsters adapting; the model is now wrong, not merely
+   extrapolating. Label/prior drift is P(y) moving, which breaks calibration and
+   any cost-derived threshold. And in practice the most frequent cause of a drift
+   alert is none of these: it is an upstream schema or logging change, which you
+   should rule out first because the fix is upstream, not a retrain.
+
+Q: How do you detect drift without labels?
+A: Per-feature distribution tests against a reference window - PSI (>0.25 is the
+   usual "significant" convention), KS for continuous, chi-square for
+   categorical, Wasserstein or JS as effect sizes. But the strongest single tool
+   is a domain classifier: train a model to distinguish reference rows from
+   current rows; AUC near 0.5 means indistinguishable, and if it is high, its own
+   feature importances name exactly what drifted. That also catches multivariate
+   drift that per-feature tests miss. Complement with prediction-distribution
+   drift and confidence collapse as early proxies for concept drift, and buy a
+   small daily random sample of human labels so you have an unbiased quality
+   signal before natural labels mature.
+
+Q: With ten million rows, every KS test is significant. What do you do?
+A: Stop testing p-values and monitor effect sizes - PSI, Wasserstein, JS - with
+   thresholds set empirically by backtesting historical windows you know were
+   fine. Also control multiple comparisons across hundreds of features by
+   weighting drift by feature importance and alerting only on features the model
+   actually relies on, and attach an estimated performance impact wherever
+   possible.
+
+Q: How often should you retrain?
+A: Measure, do not guess. Backtest with a rolling origin: replay the last year,
+   retrain at various cadences and window policies, and plot the realised metric.
+   Pick the cadence where the decay curve starts to bend. Fraud and ads often
+   need daily; churn weekly to monthly; a slow-moving risk model quarterly. Then
+   layer event triggers (product launch, new market) on top of the schedule, and
+   treat drift alerts as an invitation to check impact rather than an automatic
+   retrain - otherwise you spend your year chasing seasonality.
+
+Q: What must be true before an automated pipeline promotes a model to
+   production?
+A: Quality gates on a FROZEN evaluation set, not one regenerated by the same
+   pipeline; per-slice gates, not just the aggregate; a sane prediction
+   distribution versus the incumbent; data validation passed on the training
+   snapshot; and a shadow or canary period with automatic rollback. Plus the
+   basics: the model version records its code commit, data snapshot and config,
+   and rollback is a pointer change that has actually been tested.
+
+Q: What are the three things you must version, and why is a model version a
+   triple?
+A: Code, data, and the model artefact plus its metadata. A model version is the
+   triple (code commit, data snapshot id, config), because reproducing a result
+   requires all three - "SELECT * FROM users" is not a data version. If any one
+   is unversioned the model cannot be debugged, compared, or defended in an
+   audit.
+
+Q: Name some ML-specific technical debt.
+A: CACE - changing anything changes everything, because models entangle their
+   inputs. Correction cascades, where model B patches model A's output and A can
+   no longer change. Undeclared consumers reading your prediction table. Untracked
+   data dependencies, where an unused feature still costs a live pipeline.
+   Feedback loops, direct and hidden. Configuration debt - thresholds and windows
+   scattered and untested. Pipeline jungles and glue code, where the model is 5%
+   of the system.
+
+--------------------------------------------------------------------------------
+SYNTHESIS QUESTIONS
+--------------------------------------------------------------------------------
+
+Q: Design an end-to-end system for detecting fraudulent transactions.
+A: Frame it: score every transaction in real time, decide block / step-up
+   authentication / allow, so this is ranking into three actions with a very
+   asymmetric cost matrix and a hard latency budget (tens of milliseconds).
+   Labels come from chargebacks and are 30-90 days late, plus fast analyst
+   labels on a reviewed sample. Data: transaction stream plus point-in-time
+   account and device aggregates from a feature store, with the same definitions
+   online and offline. Split by time, with purging around the label window, and
+   by entity so one card is not in both sides. Baselines: the existing rule
+   engine, then a GBM. Metric: recall at a fixed false-positive budget plus
+   precision@k for the analyst queue, calibrated probabilities so the cost
+   threshold is meaningful, evaluated per slice (card type, geography, merchant
+   category, new versus established accounts). Serve behind a low-latency API
+   with the rule engine as fallback, log every score and feature vector, shadow
+   then canary then a controlled ramp. Monitor feature freshness and nulls
+   first, then prediction and feature drift, then chargeback-based metrics as
+   they mature. Retrain weekly on a weighted window because adversaries adapt,
+   and keep a random unblocked holdout so I can still observe the outcomes of
+   transactions the model would have blocked - otherwise the next model trains
+   only on the survivors.
+   Follow-up to expect: how do you handle the fact that blocking prevents you
+   from observing the label? (reject inference, propensity weighting, and the
+   holdout.)
+
+Q: A model has been in production for six months and stakeholders say it "feels
+   worse". Nobody has an alert. How do you investigate?
+A: Layer by layer from the outside in. Infrastructure: latency, error rates,
+   timeouts - a p99 regression or partial outage looks like quality loss. Data
+   quality: feature freshness, null rates, cardinality and schema versus
+   training; a silently failing upstream job is the most likely cause. Then
+   distribution: input drift with a domain classifier, and prediction
+   distribution against the historical one. Then quality: recompute the metric on
+   whatever labels have matured, sliced - the degradation is usually concentrated
+   in a segment (a new market, a new device) rather than spread evenly. In
+   parallel I check whether the decision policy or the threshold changed, and
+   whether something downstream changed how the prediction is used. The
+   deliverable is not only the fix but the monitor that should have caught it,
+   plus the measured detection gap.

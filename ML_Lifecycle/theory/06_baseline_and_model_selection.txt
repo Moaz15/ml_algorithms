@@ -1,0 +1,167 @@
+STAGE 5: BASELINES, ALGORITHM SELECTION AND TRAINING EXECUTION
+================================================================================
+
+--------------------------------------------------------------------------------
+1. BASELINES: BUILD THE BORING THING FIRST
+--------------------------------------------------------------------------------
+
+A baseline defines what "better" means and validates the whole pipeline end to
+end before any modelling effort is spent. Three tiers, and you should have all
+three numbers before training anything interesting:
+
+    Tier 0  Trivial / null model
+            classification: predict the majority class, or predict the base rate
+                            as a constant probability
+            regression:     predict the mean or median
+            time series:    predict the last observed value (naive/persistence)
+                            or the value from the same period last year
+            ranking:        random order, or popularity order
+    Tier 1  Simple heuristic - the rule the business already uses. "Flag any
+            transaction over 5000 from a new device." Frequently beats a first
+            ML model, and if it does, that is the deliverable.
+    Tier 2  Simple model - logistic regression or a small gradient boosted tree
+            on ten obvious features. This is the number your fancy model must
+            beat by enough to justify its operational cost.
+
+The baseline's real job is plumbing verification: can you build a dataset, fit,
+predict, evaluate, and get a number that is not absurd? An implausibly good
+Tier 0 result means a broken split or a broken metric, and you have found it for
+free.
+
+Report improvements RELATIVE to Tier 1/2, never in absolute terms alone.
+
+--------------------------------------------------------------------------------
+2. ALGORITHM SELECTION: THE DECISION FACTORS
+--------------------------------------------------------------------------------
+
+No Free Lunch is the honest theoretical statement: averaged over all possible
+problems, no algorithm dominates. Practically, the choice is driven by seven
+things, and accuracy is only one of them.
+
+    Data type       tabular            -> gradient boosted trees, first choice
+                    text               -> transformers; linear + TF-IDF as a
+                                          strong, cheap baseline
+                    images/audio       -> CNNs / transformers, transfer learning
+                    graphs             -> GNNs, or feature-ise the graph and use
+                                          trees
+                    sequences/time     -> classical (ARIMA, ETS), GBMs on lag
+                                          features, or sequence models
+    Data volume     < 1k rows          -> linear/regularised models, strong
+                                          priors, simple trees; expect wide CIs
+                    1k-1M              -> tree ensembles dominate
+                    > 1M and rich      -> deep learning starts to pay
+    Dimensionality  p >> n             -> heavy regularisation, linear models,
+                                          Naive Bayes
+    Interpretability required by law or by adoption -> linear, GAMs, shallow
+                    trees, or a complex model + surrogate explanations plus
+                    monotonic constraints
+    Latency/memory  10 ms p99 on CPU rules out a 200-tree ensemble at depth 12
+                    unless you distil or quantise
+    Non-linearity   strong interactions -> trees/NNs; smooth global structure
+                    with extrapolation needs -> linear/GAM (trees CANNOT
+                    extrapolate beyond the training range, which matters for
+                    trending targets)
+    Team & ops      what your team can debug at 3am is a legitimate criterion
+
+Default ladder for a new tabular problem:
+    1. Tier 0/1 baselines
+    2. Regularised logistic/linear regression on clean features (fast, calibrated
+       by nature, tells you if the problem is basically linear)
+    3. LightGBM/XGBoost with light tuning (usually the winner)
+    4. Only if justified: deep model, stacking, or a specialised architecture
+
+Say out loud in an interview: for tabular data, gradient boosted trees remain
+the default and deep learning rarely wins on accuracy alone; the reason to move
+past GBMs is usually multi-modality, very large data, or the need for shared
+representations - not a few points of AUC.
+
+--------------------------------------------------------------------------------
+3. MODEL CONFIGURATION DECISIONS THAT ARE NOT HYPERPARAMETERS
+--------------------------------------------------------------------------------
+
+    Loss function     it encodes your cost asymmetry. MAE vs MSE (outlier
+                      sensitivity), Huber (a compromise), quantile/pinball loss
+                      (when over- and under-prediction cost differently),
+                      focal loss (extreme imbalance), weighted cross-entropy
+                      (class costs). Choosing the loss is a business decision.
+    Output form       a probability, a class, a rank, or an interval. Prefer to
+                      train probabilities and threshold LATER - the threshold
+                      is a deployment parameter that can change without
+                      retraining.
+    Class weights     vs resampling vs threshold tuning; see
+                      ../../handling_imbalanced_data.txt.
+    Multi-class shape one-vs-rest vs softmax vs hierarchical.
+    Constraints       monotonicity (price up -> risk down), fairness
+                      constraints, feature interaction restrictions. Supported
+                      natively in LightGBM/XGBoost and worth a lot for
+                      stakeholder trust.
+    Target transform  log1p a skewed target, then remember that the mean of the
+                      log is not the log of the mean - back-transforming
+                      introduces bias (needs a smearing/Duan correction).
+
+--------------------------------------------------------------------------------
+4. TRAINING EXECUTION AND EXPERIMENT HYGIENE
+--------------------------------------------------------------------------------
+
+Reproducibility, in order of importance:
+    - fixed seeds (data shuffling, initialisation, dropout, bootstrap sampling)
+      AND awareness that GPU non-determinism can still move results
+    - pinned dependency versions and a container image
+    - versioned dataset snapshot (a hash or a DVC pointer, not "the table")
+    - the exact config as code/YAML, checked in
+    - logged git commit for every run
+
+Track for every experiment: config, data version, code version, metrics per
+epoch/iteration, final metrics per slice, artefacts, and wall-clock/cost. Tools:
+MLflow, Weights & Biases, or a disciplined directory of JSON - the tool matters
+less than the discipline. See 13_mlops_versioning_retraining.txt.
+
+Change one thing at a time. An experiment that changed the features, the model
+and the split tells you nothing.
+
+Training diagnostics to always plot:
+    - loss curve for train and validation. Divergence = overfitting; both flat
+      and high = underfitting or a broken pipeline; a spiky validation curve =
+      learning rate too high or batch too small.
+    - learning curve (metric vs training set size). If validation is still
+      improving with more data, get more data instead of tuning. If the two
+      curves have converged and plateaued, more data will not help and you need
+      a better model or better features. This single plot answers "should I
+      collect more data or build a bigger model?" - a favourite interview
+      question. See ../../bias_variance.txt.
+    - for iterative learners, early stopping on a validation metric with a
+      patience, keeping the best checkpoint.
+
+Efficiency notes: start on a subsample to iterate quickly, only scale once the
+pipeline is right; cache the feature matrix; profile before distributing;
+distributed training adds days of debugging and should be a last resort.
+
+--------------------------------------------------------------------------------
+5. ENSEMBLING AND STACKING AS A SELECTION DECISION
+--------------------------------------------------------------------------------
+
+Averaging several decorrelated models almost always improves the offline metric
+by a small amount and multiplies the serving and maintenance cost. Do it when
+the metric gain is genuinely valuable (competitions, high-stakes scoring) and
+skip it when it is not.
+
+Key mechanics live in ../../Ensemble_Learning/. The lifecycle point: stacking
+requires OUT-OF-FOLD predictions to train the meta-learner, otherwise the
+meta-learner sees in-sample predictions and leaks. This is one of the most
+common stacking bugs.
+
+--------------------------------------------------------------------------------
+6. WHEN THE MODEL IS BAD: A DEBUGGING ORDER
+--------------------------------------------------------------------------------
+
+    1. Can the model overfit a tiny sample (100 rows) to near-zero loss? If not,
+       there is a bug in the code, the labels, or the optimisation - not a
+       modelling problem.
+    2. Is the metric implemented correctly, and is it the right metric?
+    3. Is the split correct (leakage in either direction)?
+    4. Underfitting (train error high): more capacity, better features, less
+       regularisation, longer training.
+    5. Overfitting (train << validation): more data, more regularisation,
+       simpler model, early stopping, augmentation.
+    6. Both errors acceptable but business value absent: the framing is wrong -
+       go back to 01_problem_framing.txt.

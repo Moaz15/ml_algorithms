@@ -1,0 +1,230 @@
+STAGE 3: DATA CLEANING AND EXPLORATORY DATA ANALYSIS
+================================================================================
+
+Scope note: mechanics of imputation, outlier treatment, encoding and scaling
+live in ../../FeatureEngineering/theory/. This file covers what EDA is FOR, the
+quality checks that belong in a pipeline rather than a notebook, and the
+diagnostics (distributions, correlation, multicollinearity, leakage) that decide
+what you do next.
+
+--------------------------------------------------------------------------------
+1. WHAT EDA IS ACTUALLY FOR
+--------------------------------------------------------------------------------
+
+EDA is not "make plots". It answers five questions:
+
+    1. Is this dataset what the documentation claims it is? (schema, grain,
+       row counts, date ranges)
+    2. What is the GRAIN of a row - one row per what? Most join bugs are grain
+       bugs. Verify with a uniqueness check on the claimed key.
+    3. What is broken, missing or impossible, and is the brokenness random or
+       structured?
+    4. What is the shape of the target, and which features plausibly relate
+       to it?
+    5. Is anything too good to be true? (leakage detection)
+
+Do all of it on the TRAINING SPLIT only. Looking at the test set - even just
+plotting it - leaks information through your own decisions. If you must sanity-
+check the test set, check schema and row counts, not distributions or
+relationships to the target.
+
+--------------------------------------------------------------------------------
+2. THE DATA QUALITY CHECKLIST (AUTOMATE THIS, DO NOT EYEBALL IT)
+--------------------------------------------------------------------------------
+
+Per dataset:
+    - row count vs expectation, and per-day row count over time (a step change
+      is an upstream incident)
+    - primary key uniqueness; grain matches the documented grain
+    - referential integrity on join keys (orphan rate)
+    - date range, timezone consistency, future-dated rows
+
+Per column:
+    - dtype and dtype stability across partitions
+    - null rate, and null rate over time
+    - cardinality (a categorical that jumps from 30 to 30,000 levels is a bug)
+    - range/domain violations (negative age, latitude > 90, price = 0)
+    - sentinel values masquerading as data: -1, 999, 0, "N/A", "", "unknown",
+      1970-01-01, 9999-12-31. These must be converted to NaN BEFORE any
+      statistics are computed, or every mean you look at is wrong.
+    - unit consistency (cents vs dollars, metres vs feet, ms vs s) - usually
+      revealed by a bimodal histogram three orders of magnitude apart
+    - encoding/whitespace/case chaos in strings ("US", "us", " US ")
+
+Write these as assertions in the pipeline (Great Expectations, pandera, or plain
+asserts). Checks that live only in a notebook protect nothing. Each check needs
+a severity: fail the run vs warn and continue.
+
+--------------------------------------------------------------------------------
+3. MISSING DATA: THE PART THAT IS ANALYSIS, NOT MECHANICS
+--------------------------------------------------------------------------------
+
+Classify the mechanism before choosing a fix:
+    MCAR  missingness independent of everything. Rare. Dropping rows is safe
+          but wasteful.
+    MAR   missingness depends on OBSERVED features (income missing more often
+          for younger users). Model-based imputation conditioned on those
+          features is principled.
+    MNAR  missingness depends on the UNOBSERVED value itself (high earners
+          decline to state income). No imputation recovers it. The best move is
+          usually to keep the missingness as a feature.
+
+Practical consequences:
+    - Always add an `is_missing` indicator for non-trivial null rates. The fact
+      of missingness is frequently more predictive than the imputed value.
+    - Compare the target rate for missing vs present. A large gap means MNAR-ish
+      structure and possible leakage (the field may only be populated after the
+      outcome).
+    - Fit imputers on TRAIN ONLY and apply to val/test. A median computed over
+      the full dataset is leakage.
+    - Tree ensembles can handle missing natively (LightGBM/XGBoost learn a
+      default direction); linear models and neural nets cannot.
+
+Mechanics: ../../FeatureEngineering/theory/missing_data.txt
+
+--------------------------------------------------------------------------------
+4. OUTLIERS AND ANOMALIES: DECIDE WHAT THEY MEAN
+--------------------------------------------------------------------------------
+
+Three kinds, three responses:
+    Data error      impossible values -> null them out and fix the pipeline
+    Rare-but-real   a genuine whale customer -> keep; winsorise or log-transform
+                    if the model is sensitive, never silently delete
+    The signal      in fraud/failure detection the outliers ARE the target ->
+                    deleting them deletes the problem
+
+Detection: z-score only if roughly normal; IQR fences as a robust default;
+modified z-score with MAD for heavy tails; Mahalanobis or Isolation Forest for
+multivariate outliers that are unremarkable in every single dimension.
+See ../../FeatureEngineering/theory/outliers.txt and Ensemble_Learning/ for
+Isolation Forest.
+
+Sensitivity matters: linear regression, k-means and PCA are dominated by
+extremes; tree splits and rank-based methods barely notice them.
+
+--------------------------------------------------------------------------------
+5. DUPLICATES AND NOISE
+--------------------------------------------------------------------------------
+
+    Exact duplicates      often a re-delivered event or a bad join fan-out.
+                          Check the join first - deduplicating the symptom hides
+                          a broken pipeline.
+    Near duplicates       same entity, different formatting; retweets, scraped
+                          mirrors. Use fuzzy matching / MinHash / embeddings.
+    Cross-split duplicates  THE dangerous one. The same record in train and test
+                          gives you an inflated score that no amount of
+                          cross-validation reveals. Deduplicate BEFORE splitting,
+                          and split by entity (see 04_data_splitting_validation).
+    Bots and automation   heavy right tail in event counts per user; strip
+                          before computing behavioural aggregates.
+
+Noise: label noise (fix the guideline, use overlap), feature noise (smoothing,
+aggregation over longer windows), and quantisation artefacts. Some noise is
+irreducible error - the sigma^2 term in ../../bias_variance.txt.
+
+--------------------------------------------------------------------------------
+6. UNIVARIATE ANALYSIS
+--------------------------------------------------------------------------------
+
+Numeric: mean vs median gap (skew), std, IQR, min/max, skewness, kurtosis, and
+always a histogram plus a quantile table (1, 5, 25, 50, 75, 95, 99). The
+percentile table catches what mean/std hide: spikes at zero, truncation at a
+cap, a second mode.
+
+What the shapes tell you:
+    Heavy right skew (revenue, counts, durations) -> log1p or Box-Cox for
+        linear models; irrelevant for trees.
+    Multimodal        -> a latent segment is hiding in the column; consider a
+        segment feature or separate models.
+    Spike at zero     -> zero-inflated; model as two parts (did it happen? how
+        much given it happened?).
+    Hard cap / floor  -> censoring. Treating a censored value as observed biases
+        everything; consider survival methods.
+
+Categorical: frequency table, cardinality, share of the top-k levels, share of
+rare levels (candidates for an "other" bucket), unseen-level risk at serving.
+
+Target: class balance (see ../../handling_imbalanced_data.txt), or for
+regression the distribution and its tail. If the target is skewed, decide early
+whether you predict y or log(y) - it changes the loss you are implicitly
+minimising and the metric that makes sense.
+
+--------------------------------------------------------------------------------
+7. BIVARIATE AND CORRELATION ANALYSIS
+--------------------------------------------------------------------------------
+
+    numeric-numeric      Pearson (linear), Spearman (monotonic, rank-based,
+                         robust to outliers and skew), scatter with a smoother
+    numeric-categorical  group means/medians, box plots, ANOVA F, eta-squared
+    categorical-categorical  contingency table, chi-square, Cramer's V
+    non-linear           mutual information, or the gain from a single-feature
+                         gradient boosted stump ensemble
+
+Correlation caveats worth saying out loud in an interview: Pearson only sees
+linear structure (Anscombe's quartet), correlation is not causation, and a
+feature uncorrelated with the target in isolation can still be highly useful in
+interaction with another (XOR is the canonical case). This is why filter-only
+feature selection is weak - see 05_feature_selection.txt.
+
+--------------------------------------------------------------------------------
+8. MULTICOLLINEARITY
+--------------------------------------------------------------------------------
+
+Definition: one feature is (nearly) a linear combination of others, so X^T X is
+near-singular.
+
+Detection:
+    - correlation matrix > |0.8| pairs (catches pairwise only)
+    - VIF_j = 1 / (1 - R_j^2), where R_j^2 comes from regressing feature j on
+      all others. VIF > 5 is suspicious, > 10 is severe. VIF catches multi-way
+      collinearity that a pairwise matrix misses.
+    - condition number of the scaled design matrix (> 30 is a warning)
+
+Consequences:
+    - Coefficient VARIANCE explodes; signs flip between refits or CV folds.
+      Coefficients become uninterpretable and unstable.
+    - Predictive accuracy is usually FINE. Collinearity hurts inference, not
+      prediction, as long as the collinearity structure holds at serving time.
+    - Feature-importance mass gets split arbitrarily between correlated
+      features, so "unimportant" is not "useless" (see 09_interpretability).
+
+Fixes: drop one of the pair, combine them (ratio, sum, difference), PCA on the
+correlated block (loses interpretability), or L2 regularisation - ridge is the
+canonical answer because it shrinks correlated coefficients together and
+stabilises the solution. See ../../regularization_concept.txt. Perfect
+collinearity from one-hot encoding (the dummy trap) is a special case: drop one
+level for linear models with an intercept.
+
+Trees are largely immune to collinearity for prediction, but their split-based
+importances are diluted by it.
+
+--------------------------------------------------------------------------------
+9. LEAKAGE DETECTION DURING EDA
+--------------------------------------------------------------------------------
+
+Red flags, in order of how often they turn out to be leakage:
+    - a single feature with AUC > 0.95 on its own
+    - a validation score dramatically better than any reasonable prior
+    - a feature whose name contains "final", "total", "closed", "reason",
+      "status", "resolved", "amount_refunded"
+    - a feature whose null rate differs enormously between classes
+    - an ID or timestamp with strong predictive power (rows were sorted by
+      outcome; the ID encodes the collection batch)
+
+The test: for each suspect feature ask "would this value, with this value, have
+existed in the database one second before the prediction time?" If you cannot
+answer with certainty, trace its lineage. Do not accept a suspiciously good
+model. See also 04_data_splitting_validation.txt section on leakage taxonomy.
+
+--------------------------------------------------------------------------------
+10. WHAT TO PRODUCE AT THE END OF STAGE 3
+--------------------------------------------------------------------------------
+
+    - a data quality report with the automated checks and their status
+    - a data dictionary: column, meaning, source, grain, null rate, availability
+      at serving time
+    - a shortlist of candidate features with their measured relationship to the
+      target
+    - a list of confirmed leakage risks and how they are being excluded
+    - the split strategy implied by what you found (entity leakage? time
+      structure? group structure?) - the input to stage 4

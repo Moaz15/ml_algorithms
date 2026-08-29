@@ -1,0 +1,171 @@
+STAGE 2: DATA COLLECTION, INGESTION, LABELLING AND GOVERNANCE
+================================================================================
+
+--------------------------------------------------------------------------------
+1. SOURCE IDENTIFICATION
+--------------------------------------------------------------------------------
+
+Typical sources and what they cost you:
+
+    OLTP databases (Postgres/MySQL)
+        Fresh and authoritative, but MUTABLE. A row updated in place destroys
+        history: if `user.plan` is overwritten, you can never reconstruct what
+        the plan was on the score date. This is a leading cause of silent label
+        leakage in company data. Fix with CDC (change data capture) into an
+        append-only table, or with dated snapshot tables.
+    Data warehouse / lake (BigQuery, Snowflake, S3 + Parquet)
+        Where training data should come from. Usually a daily snapshot, so
+        expect T-1 freshness.
+    Event streams (Kafka, Kinesis)
+        Append-only, timestamped, replayable - ideal for point-in-time correct
+        features. Watch for out-of-order and late-arriving events.
+    Third-party APIs
+        Rate limits, cost per call, schema changes without notice, and the
+        availability question: is this API up and fast enough at serving time?
+    Web scraping
+        Legally and ethically load-bearing (terms of service, robots.txt, PII).
+        Brittle: a layout change breaks it silently, which looks like drift.
+    Human-generated logs / support tickets / clickstream
+        Enormous volume, poor signal-to-noise, heavy bot contamination.
+
+Two questions per source: (a) can I reconstruct its state AS OF a past
+timestamp, and (b) will it be available, at the required latency, at serving
+time? A source failing (a) cannot be used for training; a source failing (b)
+cannot be used for serving.
+
+--------------------------------------------------------------------------------
+2. BATCH VS STREAMING INGESTION
+--------------------------------------------------------------------------------
+
+    Batch        scheduled job (hourly/daily) pulls a window, writes a table.
+                 Simple, cheap, easy to backfill, re-run and test. Latency =
+                 schedule interval. The default choice.
+    Streaming    continuous consumption from a log, incremental state updates.
+                 Latency in seconds. Needed for fraud, bidding, live person-
+                 alisation. Costs: exactly-once semantics, watermarks for late
+                 events, stateful operators, much harder backfills.
+    Micro-batch  a streaming API over small batches (Spark Structured
+                 Streaming). A pragmatic middle ground.
+
+Do not choose streaming because it sounds modern. Choose it when the value of a
+decision decays within minutes.
+
+The lambda/kappa problem: if features are computed by a batch job for training
+and a streaming job for serving, the two implementations WILL diverge. That is
+training/serving skew, the most common production ML bug. Remedies:
+    - one implementation, two runners (same code in batch and stream mode)
+    - a feature store that materialises one definition to both offline and
+      online stores
+    - log the features actually used at serving time and train on those logs
+      ("log-and-train"), which makes skew structurally impossible
+
+--------------------------------------------------------------------------------
+3. POINT-IN-TIME CORRECTNESS (THE CORE IDEA OF THIS STAGE)
+--------------------------------------------------------------------------------
+
+For a training row with entity e and prediction time t, every feature must be
+computed from information available strictly before t, and the label must come
+from strictly after t.
+
+    past window        t        label window
+    [--- features ---)  |  [------ label ------]
+
+Violations, roughly in order of frequency:
+    - joining a dimension table holding today's values onto historical events
+    - aggregations over the whole table ("total orders per user") instead of
+      "orders per user before t"
+    - a feature that is downstream of the label (`refund_amount` for a fraud
+      label, `cancellation_reason` for churn)
+    - timestamps stored as ingestion time or in local time, shifting rows
+      across the boundary
+    - late-arriving data backfilled into the past, so the training snapshot
+      contains rows that did not exist at t
+
+Implementation: as-of joins (`ASOF JOIN`, `pandas.merge_asof`), event-time
+windowed aggregations, feature-store point-in-time joins. Keep two timestamps
+per record: event_time (when it happened) and ingest_time (when we learned of
+it). Reconstructing "what we knew at t" needs both.
+
+--------------------------------------------------------------------------------
+4. DATA LABELLING AND ANNOTATION
+--------------------------------------------------------------------------------
+
+Where labels come from, cheapest first:
+    Implicit / behavioural   clicks, purchases, cancellations. Free and
+                             plentiful, but PROXIES: a click is not
+                             satisfaction, and it is biased by what was shown.
+    System-generated         chargebacks, returns, ticket resolution codes.
+                             Reliable, delayed, sometimes policy-defined.
+    Weak supervision         heuristic labelling functions combined into
+                             probabilistic labels (Snorkel-style). Good for
+                             bootstrapping thousands of noisy labels.
+    Programmatic / distant   an existing rule engine or an LLM labels the data,
+                             a human audits a sample. The standard cold-start
+                             move now. You inherit the labeller's blind spots
+                             and cap yourself near the teacher's quality.
+    Human annotation         highest quality, highest cost, hardest to scale.
+
+Making human annotation work:
+    - Write a labelling guideline with edge cases and counterexamples.
+      Ambiguity in the guideline becomes irreducible noise in your metric.
+    - Measure inter-annotator agreement: Cohen's kappa (two annotators),
+      Fleiss' kappa (more), Krippendorff's alpha (mixed types). Kappa corrects
+      for chance agreement; raw percent agreement is misleading on skewed
+      classes. Human-human agreement of 0.7 is your practical ceiling - do not
+      promise a model at 0.95.
+    - Overlap 10% of items across 3 annotators, adjudicate conflicts.
+    - Active learning to spend budget where it matters: label what the current
+      model is most uncertain about (margin/entropy sampling) or what is most
+      representative (diversity sampling). Uncertainty sampling alone
+      over-selects outliers; combine the two.
+    - Seed gold questions into the queue to detect bad annotators.
+    - Version the guideline. A guideline change is a label-distribution change,
+      i.e. concept drift you inflicted on yourself.
+
+Label noise is asymmetric: noise in TRAINING mostly costs accuracy, noise in
+TEST destroys your ability to measure anything. Spend disproportionately on
+evaluation-set quality.
+
+--------------------------------------------------------------------------------
+5. GOVERNANCE, ACCESS AND CONTRACTS
+--------------------------------------------------------------------------------
+
+    Data contracts   explicit, versioned schema agreement with the producing
+                     team: names, types, nullability, semantics, freshness and
+                     completeness SLAs. Without one, an upstream team renames a
+                     column on a Tuesday and your model degrades silently.
+    Schema registry  enforce backward/forward compatibility at write time.
+    Lineage          which table came from which, and which model consumed it.
+                     Needed for impact analysis and deletion requests.
+    Access control   least privilege; PII in restricted columns; separate raw,
+                     curated and feature zones.
+    Anonymisation    hashing, tokenisation, k-anonymity for shared datasets,
+                     differential privacy where aggregates leave the perimeter.
+    Retention        GDPR/CCPA-style deletion rights propagate to derived tables
+                     and sometimes to model artefacts. Know the policy before
+                     training on user text.
+    Auditability     immutable raw zone, never edited; clean into a separate
+                     curated zone so every transformation is reproducible.
+
+The bronze/silver/gold (raw/curated/feature) layering exists for exactly this:
+raw is append-only, curated is typed and deduplicated, gold holds business-level
+features that both models and BI consume.
+
+--------------------------------------------------------------------------------
+6. SAMPLING WHEN YOU CANNOT TAKE EVERYTHING
+--------------------------------------------------------------------------------
+
+    Random          unbiased, simple, needs volume.
+    Stratified      preserve class or segment proportions; essential for rare
+                    classes and for slice-level evaluation power.
+    Time-based      keep whole periods intact so seasonality survives.
+    Negative down-  keep all positives, sample negatives at rate r. Cheap and
+    sampling        effective under extreme imbalance, but it shifts the base
+                    rate and MISCALIBRATES probabilities. Correct by adjusting
+                    the log-odds intercept by log(r), or with weights 1/r.
+                    See ../../handling_imbalanced_data.txt.
+    Weighted        if you oversample a segment deliberately, carry the weights
+                    into training AND evaluation or your metrics lie.
+
+Record the sampling scheme in dataset metadata. A dataset whose sampling scheme
+is unknown cannot support unbiased evaluation.

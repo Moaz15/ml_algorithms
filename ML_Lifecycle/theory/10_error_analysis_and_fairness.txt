@@ -1,0 +1,169 @@
+STAGE 7c: ERROR ANALYSIS, SLICE ANALYSIS AND FAIRNESS AUDITING
+================================================================================
+
+Aggregate metrics tell you whether to keep working. Error analysis tells you
+WHAT to work on. It is the highest return-per-hour activity in applied ML and
+the thing most candidates never mention.
+
+--------------------------------------------------------------------------------
+1. THE ERROR ANALYSIS LOOP
+--------------------------------------------------------------------------------
+
+    1. Take the validation set (never the test set - you will iterate on this).
+    2. Sort by loss / by |error| / by confidence-weighted wrongness.
+    3. MANUALLY inspect 50-100 of the worst cases. Actually look at them.
+    4. Tag each with a hypothesised cause: bad label, missing feature, genuinely
+       ambiguous, out-of-distribution input, rare pattern, preprocessing bug,
+       duplicated entity, etc.
+    5. Count the tags. Now you have a Pareto chart of error causes.
+    6. Estimate the ceiling for fixing each category ("30% of errors are
+       mislabelled -> fixing labels buys at most 30% of the remaining gap").
+    7. Fix the biggest addressable bucket. Repeat.
+
+This routinely reveals that the top error bucket is a data problem, not a model
+problem - which is why "collect 200 more labels of type X" beats another week of
+tuning. Also inspect the most CONFIDENT mistakes specifically: they are where
+leakage, label errors, and systematic blind spots hide.
+
+Useful artefacts to keep: a spreadsheet of tagged errors per model version (so
+you can see which categories a change actually fixed), and a regression suite of
+specific hard cases that must not break.
+
+--------------------------------------------------------------------------------
+2. SLICE ANALYSIS
+--------------------------------------------------------------------------------
+
+A slice is a subset defined by a feature or combination: new vs returning users,
+mobile vs desktop, each country, each language, each merchant category, top-10%
+by value, first week after signup, weekends, each data source.
+
+Why it matters: the aggregate metric is dominated by the majority slice. A model
+can improve overall while getting worse for every high-value customer.
+Simpson's paradox is not exotic - it is routine when slice sizes differ.
+
+Method:
+    - Enumerate slices from domain knowledge and from the feature set.
+    - Compute the metric per slice, with the slice's SIZE and a confidence
+      interval. A slice with 40 examples showing 0.6 accuracy is noise.
+    - Rank by (size x gap from overall) to find where the loss actually is.
+    - Automate: slice-finding tools (SliceFinder, Domino, error analysis
+      dashboards) search for underperforming subgroups automatically, including
+      conjunctions you would not have thought of.
+    - Guard the important slices with per-slice acceptance thresholds in CI. A
+      model that improves the aggregate but breaks a critical slice should fail
+      the release.
+
+Beware of multiple comparisons: search 500 slices and some will look bad by
+chance. Require a slice failure to reproduce on a second period or a holdout
+before acting.
+
+--------------------------------------------------------------------------------
+3. ROBUSTNESS AND STRESS TESTING
+--------------------------------------------------------------------------------
+
+    Invariance tests    perturb an input in a way that should not change the
+                        prediction (synonym swap, name swap, image crop, unit
+                        change). A prediction change is a bug.
+    Directional tests   perturb in a way that SHOULD move the prediction in a
+                        known direction (raise the price, add a risk factor).
+    Minimum functionality tests   trivially easy cases the model must get right.
+                        (The CheckList framework for NLP formalises these three.)
+    Missing-feature     simulate an upstream outage: what does the model do when
+    degradation         a feature goes null or stale? This WILL happen.
+    Adversarial /       small worst-case perturbations, and inputs from outside
+    OOD inputs          the training distribution. At minimum, know whether the
+                        model fails loudly or silently.
+    Extrapolation       trees output a constant beyond the training range;
+                        linear models extrapolate a line. Know which failure
+                        mode you have.
+
+--------------------------------------------------------------------------------
+4. FAIRNESS: DEFINITIONS AND THE IMPOSSIBILITY RESULT
+--------------------------------------------------------------------------------
+
+Let A be a protected attribute, Y the true outcome, Yhat the prediction,
+S the score.
+
+    Demographic parity (statistical parity)
+        P(Yhat=1 | A=a) equal across groups. Ignores actual outcome rates, so it
+        can force qualified/unqualified people to be treated identically.
+        Appropriate when the base-rate difference is itself the injustice
+        (e.g. historical exclusion).
+    Equal opportunity
+        P(Yhat=1 | Y=1, A=a) equal - equal TRUE POSITIVE rates. Usually the right
+        notion when the positive outcome is a benefit (loan, interview, treatment)
+        and missing a qualified person is the harm.
+    Equalised odds
+        equal TPR and equal FPR across groups. Stronger; needed when false
+        positives also cause harm (arrest, fraud accusation).
+    Predictive parity / calibration within groups
+        P(Y=1 | S=s, A=a) equal - a score of 0.7 means the same thing for every
+        group. What risk-assessment vendors typically claim.
+    Individual fairness
+        similar individuals get similar predictions. Requires a similarity
+        metric, which is where all the difficulty hides.
+    Counterfactual fairness
+        the prediction is unchanged in a counterfactual world where the
+        individual's protected attribute differed. Causal, principled,
+        demanding.
+
+THE IMPOSSIBILITY THEOREM (Kleinberg-Mullainathan-Raghavan; Chouldechova):
+when base rates genuinely differ between groups and the classifier is imperfect,
+calibration within groups, equal FPR and equal FNR CANNOT all hold
+simultaneously. This is arithmetic, not engineering. It is the core of the
+COMPAS debate: the vendor was right that the tool was calibrated, the critics
+were right that error rates differed by race - both were true and both could not
+be fixed at once.
+
+The consequence, and the mature interview answer: fairness is a choice of which
+error to distribute, made with domain experts, legal and affected stakeholders.
+An engineer cannot select it alone, and no library can select it for you.
+
+--------------------------------------------------------------------------------
+5. AUDITING AND MITIGATION IN PRACTICE
+--------------------------------------------------------------------------------
+
+Auditing:
+    - You need the protected attribute to MEASURE fairness even if you must not
+      USE it. Keep it in an evaluation-only, access-controlled table. Where it
+      is unavailable, proxy inference (e.g. BISG for race) is used - with its own
+      substantial error and ethical issues.
+    - Report per-group: selection rate, TPR, FPR, precision, calibration curve,
+      and the disparity ratio (the "four-fifths rule" from US employment law is a
+      common informal trigger: a selection-rate ratio below 0.8 warrants scrutiny).
+    - Include intersectional groups; a model can be fair on gender and on race
+      and unfair on their intersection.
+    - Fairlearn and AIF360 implement the standard metrics and mitigations.
+
+Mitigation, by stage:
+    Pre-processing   reweighting, resampling, learning fair representations,
+                     fixing the label-generation process. The most durable fixes
+                     are here - biased labels cannot be corrected downstream.
+    In-processing    constrained optimisation (exponentiated gradient reduction),
+                     adversarial debiasing, fairness regularisers.
+    Post-processing  group-specific thresholds to equalise TPR/FPR. Simple and
+                     effective, but explicitly using group membership in the
+                     decision may be illegal in some jurisdictions - a real
+                     tension worth naming.
+
+Sources of unfairness to look for upstream, because the model is rarely the
+origin: historical bias in the outcomes themselves, representation bias
+(underrepresented groups), measurement bias (the proxy label means different
+things in different groups - "arrested" is not "committed a crime"), aggregation
+bias (one model for populations that need different ones), and deployment bias
+(the model is used for something it was not built for).
+
+--------------------------------------------------------------------------------
+6. DOCUMENTATION
+--------------------------------------------------------------------------------
+
+    Model card    intended use, out-of-scope uses, training data, evaluation
+                  data, aggregate AND per-slice/per-group metrics, ethical
+                  considerations, limitations, contact/owner.
+    Datasheet     for the dataset: motivation, composition, collection process,
+                  preprocessing, uses, distribution, maintenance.
+
+These are cheap to write, increasingly expected (EU AI Act, internal model risk
+management), and they force you to state the limitations you would otherwise
+leave implicit. In an interview, mentioning model cards signals you have shipped
+something that a legal team looked at.

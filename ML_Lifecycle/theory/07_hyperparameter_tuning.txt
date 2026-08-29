@@ -1,0 +1,174 @@
+STAGE 6: HYPERPARAMETER TUNING AND OPTIMISATION
+================================================================================
+
+Parameters are learned from data by the training algorithm (weights, split
+points). Hyperparameters are set before training and control capacity and the
+optimisation itself (learning rate, depth, regularisation strength, number of
+trees). Tuning is a search over the hyperparameter space, scored by a validation
+metric.
+
+--------------------------------------------------------------------------------
+1. SEARCH STRATEGIES
+--------------------------------------------------------------------------------
+
+Manual / graduate-student descent
+    Fine for 1-2 parameters with strong priors. Not reproducible, not
+    parallelisable, biased by what you tried last time.
+
+Grid search
+    Exhaustive over a discretised grid. Simple, parallel, reproducible.
+    Cost is the product of the grid sizes - the curse of dimensionality applies
+    directly: 5 values for each of 6 parameters is 15,625 fits.
+    Its real weakness: with k parameters and n points per axis, each individual
+    parameter is only tried at n distinct values, no matter how big the grid is.
+
+Random search
+    Sample configurations from distributions. Beats grid search for the same
+    budget in almost all realistic settings (Bergstra and Bengio, 2012) because
+    hyperparameter importance is highly unequal - typically only 2-3 parameters
+    matter. Random search tries n distinct values of EVERY parameter with n
+    trials, so it explores the important axes far more densely.
+    Use log-uniform sampling for scale parameters (learning rate, C, lambda) -
+    sampling uniformly on [1e-5, 1e-1] wastes 90% of trials above 1e-2.
+    Default choice when you have parallel compute and no tuning infrastructure.
+
+Bayesian optimisation (TPE, GP-based, SMAC)
+    Build a probabilistic surrogate of metric = f(hyperparameters), then pick
+    the next point by an acquisition function (Expected Improvement, UCB) that
+    trades exploration against exploitation. Sequential and adaptive, so it is
+    much more sample-efficient - the right tool when each training run is
+    expensive (hours, GPUs).
+    Costs: sequential by nature (though batch variants exist), overhead per
+    suggestion, and it can get stuck if the surrogate is misled by noisy
+    evaluations. Optuna's TPE is the pragmatic default.
+
+Successive halving / Hyperband / ASHA
+    Bandit methods. Start many configurations with a small budget (few epochs,
+    subsample of data), keep the top 1/eta, multiply the budget, repeat. Enormous
+    speedups when a cheap proxy predicts final performance. Failure mode: a
+    configuration that starts slow but ends best (low learning rate) gets killed
+    early. BOHB combines Bayesian suggestion with Hyperband scheduling and is a
+    strong default for deep learning.
+
+Population-based training
+    A population trains in parallel, periodically copying weights from better
+    members and perturbing their hyperparameters. Lets hyperparameters follow a
+    SCHEDULE rather than being constant. Useful for long RL/deep training runs.
+
+Evolutionary / genetic search
+    Robust to non-differentiable, discrete, conditional spaces. Sample-hungry.
+
+--------------------------------------------------------------------------------
+2. DESIGNING THE SEARCH SPACE (WHERE MOST OF THE VALUE IS)
+--------------------------------------------------------------------------------
+
+A good space with random search beats a bad space with Bayesian optimisation.
+
+    - Use the right scale: log-uniform for learning rates, regularisation
+      strengths, and anything spanning orders of magnitude; uniform or integer
+      for depth, leaves, k.
+    - Bound it with domain knowledge; do not search depth in [1, 200].
+    - Handle conditional parameters properly (a `degree` parameter only exists
+      when kernel = poly). Optuna's define-by-run API handles this naturally.
+    - Tie coupled parameters where you can - e.g. lower the learning rate and
+      raise n_estimators together in boosting, or just fix a small learning rate
+      and select n_estimators by early stopping. This removes an entire
+      dimension from the search.
+    - If the best value lands on a boundary of the range, the range was wrong -
+      widen it and search again. Always check this.
+    - Prefer few, high-impact parameters. For GBMs: learning rate,
+      num_leaves/max_depth, min_child_samples, subsample/colsample, and the L1/L2
+      penalties. For neural nets: learning rate first, by a wide margin, then
+      batch size, weight decay, warmup/schedule, dropout.
+
+--------------------------------------------------------------------------------
+3. REGULARISATION AS A TUNED CONTROL
+--------------------------------------------------------------------------------
+
+Full treatment: ../../regularization_concept.txt. What matters here is that
+regularisation is the main dial with which tuning moves you along the
+bias-variance curve.
+
+    L2 (ridge, weight decay)   shrinks all coefficients, handles correlated
+                               features gracefully, keeps everything.
+    L1 (lasso)                 sparsity, implicit feature selection, unstable
+                               under correlation.
+    Elastic net                both; use when p > n and features are grouped.
+    Tree constraints           max_depth, min_samples_leaf, min_child_weight,
+                               max_leaves, and post-pruning (ccp_alpha).
+    Sampling                   subsample rows/columns per tree (bagging effect).
+    Dropout                    randomly zero activations at training time,
+                               approximately an ensemble over subnetworks. At
+                               inference, activations are scaled (or inverted
+                               dropout is used during training). Do not confuse
+                               with dropout at inference, which is only for MC
+                               uncertainty estimation.
+    Early stopping             implicit regularisation - it bounds how far the
+                               optimiser travels from the initialisation.
+    Data augmentation / noise  the strongest regulariser when applicable.
+    Label smoothing            reduces overconfidence, improves calibration.
+
+Batch norm and layer norm are optimisation aids with a mild regularising side
+effect, not regularisers per se - a common interview trap.
+
+--------------------------------------------------------------------------------
+4. TUNING PROTOCOL (HOW NOT TO FOOL YOURSELF)
+--------------------------------------------------------------------------------
+
+    1. Fix the evaluation protocol BEFORE tuning: the metric, the CV scheme, the
+       seed policy. Changing the protocol mid-search invalidates comparisons.
+    2. Tune on validation / CV folds. Never on test.
+    3. Beware selection noise: with 500 trials and a noisy validation metric,
+       the winner is partly the luckiest configuration, not the best one. The
+       expected optimism grows with the number of trials. Mitigations: repeated
+       CV for the top candidates, choosing the simplest configuration within one
+       standard error of the best (the "one-standard-error rule"), and a final
+       confirmation on the untouched test set.
+    4. Report the test number from ONE final model, retrained on train+validation
+       with the chosen configuration.
+    5. Use nested CV when the reported estimate itself must be unbiased (small
+       data, papers, regulated settings). See 04_data_splitting_validation.txt.
+    6. Log every trial. A tuning run whose trials are not logged cannot be
+       resumed, audited or learned from.
+    7. Budget explicitly: "200 trials or 8 GPU-hours, whichever first". Tuning
+       has sharply diminishing returns - the first 20 trials typically capture
+       most of the gain, and feature work usually beats trial 201.
+
+--------------------------------------------------------------------------------
+5. LEARNING CURVE AND VALIDATION CURVE ANALYSIS
+--------------------------------------------------------------------------------
+
+Validation curve: metric vs ONE hyperparameter, train and validation on the same
+axes. The classic U shape - as capacity grows, train error falls monotonically
+while validation error falls then rises. The minimum of the validation curve is
+the sweet spot; how sharp the minimum is tells you how much the parameter
+matters.
+
+Learning curve: metric vs TRAINING SET SIZE.
+    - large persistent gap, validation still improving  -> high variance, get
+      more data
+    - both curves converged at a poor level             -> high bias, more
+      capacity or better features; more data will not help
+    - validation better than train                      -> suspect a bug,
+      leakage, or heavy regularisation/dropout being applied only at train time
+
+These two plots answer most "what do I do next" questions and cost almost
+nothing. See ../../bias_variance.txt for the underlying decomposition and
+../../overfitting_underfitting.txt for the diagnosis table.
+
+--------------------------------------------------------------------------------
+6. THINGS PEOPLE TUNE THAT THEY SHOULD NOT (AND VICE VERSA)
+--------------------------------------------------------------------------------
+
+Do not tune:
+    - the classification threshold as part of the model search; set it after the
+      fact from the cost matrix or a precision/recall target. It is a deployment
+      parameter (see 08_evaluation_metrics.txt).
+    - random seeds. Picking the best seed is pure overfitting; instead report the
+      mean and spread across seeds.
+    - anything using the test set.
+
+Do tune, and people forget to:
+    - class weights / cost ratios
+    - the decision-relevant post-processing (calibration method, business rules)
+    - the feature set itself, jointly with the model - though nest it properly.

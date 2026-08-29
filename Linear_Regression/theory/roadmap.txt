@@ -1,0 +1,129 @@
+LINEAR REGRESSION — REVISION ROADMAP
+====================================
+
+1. FOUNDATION                                    -> SLR/concept.txt
+--------------------------------------------------------------------------------
+[x] Definition; predicts E[y|x]
+[x] Model (y = Xβ + ε) vs fit (ŷ = Xβ̂)
+[x] Error vs residual
+[x] Linear in parameters, not in features
+[x] The three variants: SLR -> MLR -> PLR
+[x] Bias trick (column of ones)
+
+2. THE OBJECTIVE                                 -> derivation, Part 2
+--------------------------------------------------------------------------------
+[x] SSE / MSE; effect of the 1/n and 1/2 factors
+[x] Why squared error: differentiability / MLE under Gaussian / conditional mean
+[x] Squared vs absolute loss -> mean vs median
+[x] Outlier sensitivity; Huber, quantile, RANSAC
+
+3. SOLVING IT                                    -> derivation, Parts 3-5, 7, 10
+--------------------------------------------------------------------------------
+[x] SLR closed form: m = S_xy/S_xx, c = ȳ - m·x̄
+[x] Slope as Cov/Var, as r·(s_y/s_x), as weighted average of y
+[x] Line passes through (x̄, ȳ); residuals sum to zero
+[x] Normal equations XᵀXβ̂ = Xᵀy
+[x] Convexity: Hessian 2XᵀX, PSD; unique iff full column rank
+[x] Geometry: projection onto col(X), hat matrix, leverage
+[x] TSS = ESS + RSS decomposition
+[x] Gradient descent; simultaneous update; batch / SGD / mini-batch
+[x] Learning rate, convergence, condition number
+[x] Closed form vs GD: cost, memory, tuning, generality
+[x] Solve, don't invert: QR / Cholesky / SVD / lstsq
+[x] Feature scaling: needed for GD and penalties, not for OLS
+
+4. ASSUMPTIONS                                   -> assumptions.txt
+--------------------------------------------------------------------------------
+[x] Linearity
+[x] Independence of errors / autocorrelation
+[x] Homoscedasticity
+[x] Normality of errors (inference only)
+[x] No perfect multicollinearity
+[x] Which assumption breaks β̂ vs which breaks only the standard errors
+[x] Diagnostic plots: residual vs fitted, Q-Q, scale-location
+[x] Outlier vs leverage vs influence; Cook's distance
+[x] Fixes: transforms, WLS, robust SEs
+
+5. MULTICOLLINEARITY                             -> derivation, Part 6
+--------------------------------------------------------------------------------
+[x] When XᵀX is singular: d > n, duplicate columns, dummy trap
+[x] Var(β̂ⱼ) formula; VIF = 1/(1 - R²ⱼ)
+[x] Symptoms: unstable signs, wide CIs, insignificant coefficients + high R²
+[x] Hurts interpretation, not prediction
+[x] Fixes: drop by VIF, ridge, PCA, pseudo-inverse, more data
+
+6. EVALUATION                                    -> evaluation_metrics.txt
+--------------------------------------------------------------------------------
+[x] R²; why it needs an intercept
+[x] Training R² never decreases when adding features
+[x] Adjusted R²
+[x] RMSE vs MAE vs MAPE
+[x] Train/test split, cross-validation
+
+7. REGULARIZATION                                -> derivation, Part 8
+--------------------------------------------------------------------------------
+[x] Ridge: (XᵀX + λI)⁻¹Xᵀy; always invertible
+[x] Lasso: no closed form; sparsity from the L1 corners
+[x] Elastic Net
+[x] Bias-variance trade; when a biased estimator beats OLS
+[x] Don't penalize the intercept; standardize first
+
+8. POLYNOMIAL (PLR)                              -> PLR/concept.txt
+--------------------------------------------------------------------------------
+[x] Basis expansion X = [1, x, x², ..., x^p]; still OLS
+[x] Degree as the bias-variance dial
+[x] Ill-conditioning of raw powers; centering / orthogonal basis
+[x] Runge's phenomenon
+[x] Extrapolation failure
+[x] Feature explosion, C(d+p, p)
+[x] Choosing degree by cross-validation
+[x] Ridge on polynomial features; splines / GAMs as the alternative
+
+9. STATISTICAL PROPERTIES                        -> derivation, Part 9
+--------------------------------------------------------------------------------
+[x] Unbiasedness and what it requires
+[x] Cov(β̂) = σ²(XᵀX)⁻¹
+[x] σ̂² = RSS/(n - d - 1)
+[x] Gauss-Markov / BLUE and its qualifiers
+[x] t-test, F-test
+
+10. IMPLEMENTATION                               -> ../code/
+--------------------------------------------------------------------------------
+[x] SLR: closed form + GD
+[x] MLR: normal equation + vectorized GD
+[ ] PLR: basis expansion, degree sweep, train vs test curve
+[ ] Ridge in the MLR implementation
+[ ] Cross-check against sklearn
+
+11. USE & COMPARISONS
+--------------------------------------------------------------------------------
+[x] Strengths, weaknesses, when to use
+[x] vs PLR / Ridge / Lasso
+[x] vs Decision trees
+[x] vs Logistic regression
+[x] vs KNN
+
+
+DRILL QUESTIONS
+--------------------------------------------------------------------------------
+[ ] Derive the SLR slope and intercept.
+[ ] Derive β̂ = (XᵀX)⁻¹Xᵀy; why not invert in code?
+[ ] Explain OLS as a projection.
+[ ] Why squared error? Give the MLE argument.
+[ ] When is XᵀX singular, and what do you do?
+[ ] Does multicollinearity hurt predictions?
+[ ] Heteroscedasticity: breaks the estimate or the standard errors?
+[ ] Closed form or GD — how do you decide?
+[ ] Why scale for GD but not for OLS?
+[ ] Why can training R² never decrease?
+[ ] Ridge vs Lasso — which zeroes coefficients, and why?
+[ ] What does Gauss-Markov claim, and not claim?
+[ ] Why is polynomial regression still linear regression?
+[ ] What breaks at high polynomial degree?
+
+
+GAPS TO CLOSE
+--------------------------------------------------------------------------------
+1. [ ] code/PLR/ — basis expansion, degree sweep, train vs test curve
+2. [ ] interview_qa.txt
+3. [ ] Ridge in the MLR implementation

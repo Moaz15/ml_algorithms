@@ -1,0 +1,221 @@
+MULTIPLE LINEAR REGRESSION — CONCEPT & INTUITION
+================================================
+
+1. WHAT ACTUALLY CHANGES
+--------------------------------------------------------------------------------
+Mechanically, nothing. The line becomes a hyperplane and the same normal
+equations solve it. SLR is the d = 1 case.
+
+Three things change in kind, and they are this whole file:
+
+  a) Coefficients become PARTIAL effects — a different quantity from an SLR
+     slope, not a bigger version of one.
+  b) Features can be correlated with EACH OTHER. No SLR analogue, and the source
+     of most practical trouble.
+  c) You lose the scatter plot, so every diagnostic is now indirect.
+
+
+2. THE PARTIAL EFFECT — "HOLDING EVERYTHING ELSE CONSTANT"
+--------------------------------------------------------------------------------
+βⱼ is the change in y for a one-unit increase in xⱼ WITH THE OTHER FEATURES HELD
+FIXED. Dropping that qualifier is the most common interpretation error.
+
+The consequence people miss: this is NOT the slope you would get regressing y on
+xⱼ alone.
+
+    SLR slope        -> the TOTAL association, including what xⱼ carries with it
+                        through other variables
+    MLR coefficient  -> what REMAINS after the other features take their share
+
+So a coefficient can be large and positive alone, then small or negative once
+other features join. Nothing broke — the question changed.
+
+Mental model: the coefficient is fitted on the part of xⱼ the other features
+cannot explain. If little is left over, it is estimated from almost no
+information — which is section 6.
+
+Say it as: "comparing houses identical in every other feature, one more sqft is
+associated with ₹4,500 more." Associated with, not causes.
+
+
+3. WHY YOU ADD FEATURES: CONFOUNDING
+--------------------------------------------------------------------------------
+The reason to move past SLR is not accuracy. A one-feature model cannot separate
+a real effect from a shared cause.
+
+Leave out a variable that drives both x and y, and its influence is absorbed into
+the coefficient on x — inflating it, shrinking it, or flipping its sign. That is
+omitted-variable bias.
+
+    Ice cream sales predict drownings. Add temperature and the ice cream
+    coefficient collapses: temperature was doing the work all along.
+
+Adding the confounder is what earns you the phrase "holding temperature fixed".
+
+Simpson's paradox is the extreme version: a trend present in every subgroup
+reverses when the groups are pooled.
+
+    Treatment A beats Treatment B for small stones AND for large stones. But A is
+    given mostly to severe cases, so pooled, B looks better — until stone size
+    enters the model.
+
+
+4. ADDING FEATURES IS NOT FREE
+--------------------------------------------------------------------------------
+  - Training fit can only improve. Any column, even pure noise, reduces training
+    RSS, so training R² never falls. Useless for deciding if a feature helped —
+    use adjusted R² or a validation set.
+  - Variance rises. More parameters from the same n rows means less precise
+    coefficients and easier overfitting.
+  - Correlated features destabilize each other (section 6).
+  - Interpretation gets harder past a handful of features.
+
+You can also add the WRONG feature. Controlling for a mediator — something on the
+causal path from x to y — erases the effect you are measuring.
+
+    Training raises skill, skill raises salary. Control for skill and the
+    training coefficient vanishes. Concluding "training does not pay" is wrong.
+
+
+5. CATEGORICAL FEATURES
+--------------------------------------------------------------------------------
+Categories must be encoded, and the encoding changes what coefficients mean.
+
+One-hot: one binary column per level. The dummy trap is keeping all k levels
+alongside an intercept — the columns then sum to the intercept column, XᵀX is
+singular, the fit is not unique. Fix: drop one level, or drop the intercept.
+
+With a level dropped, each coefficient is a difference RELATIVE TO that reference
+level, not an absolute effect. With "Mumbai" as reference, a Pune coefficient of
+-800,000 means Pune homes are ₹8 lakh cheaper than comparable Mumbai homes.
+Change the reference and every coefficient changes; predictions do not.
+
+Do not label-encode nominal categories as 1, 2, 3 — it asserts an ordering and
+equal spacing that is not there ("Chennai is three times Delhi"). Fine only for
+genuinely ordinal features.
+
+High cardinality (say 5,000 pincodes) means many coefficients fitted on a few
+rows each. Group rare levels, use target encoding, or use a model that handles
+categories natively.
+
+
+6. MULTICOLLINEARITY — THE MLR-SPECIFIC FAILURE
+--------------------------------------------------------------------------------
+Features correlated with each other. Formulas and fixes: derivation Part 6.
+
+If two features move together, the data cannot tell their effects apart. An
+increase in one coefficient offset by a decrease in the other gives nearly the
+same predictions, so the fit has no strong preference between them. Running
+example: area_sqft and number_of_rooms in a house model.
+
+Four symptoms:
+
+  1. Nonsense signs. Area gets a NEGATIVE coefficient — "bigger houses cost
+     less" — purely to offset an inflated positive coefficient on rooms.
+  2. Bouncing estimates. Drop 5 houses from 500 and area goes from dominant to
+     irrelevant. The fit is on a tightrope.
+  3. Good model, no significant features. High R², yet both area and rooms come
+     out insignificant — because "area holding rooms fixed" has almost no data
+     behind it (3,000 sqft houses with one room barely exist).
+  4. One feature takes the credit. Rooms gets a large coefficient, area gets
+     nearly zero, though both obviously matter.
+
+The distinction worth remembering: multicollinearity damages the INDIVIDUAL
+COEFFICIENTS, not the PREDICTIONS. Harmless if you only need forecasts, fatal if
+you need to report per-feature effects. Diagnose with VIF, then decide based on
+which of the two you actually need.
+
+
+7. COEFFICIENT SIZE IS NOT IMPORTANCE
+--------------------------------------------------------------------------------
+Coefficients carry units, so magnitudes are not comparable.
+
+    price = 3,200,000 + 4,500×area_sqft - 250,000×distance_to_metro_km
+
+Distance looks 55 times more important. But area varies by ~1,500 sqft across the
+data, worth ₹67 lakh of swing; distance varies by ~8 km, worth ₹20 lakh. Area is
+the bigger driver — the opposite of what the raw numbers suggested.
+
+Worse, switch area to square metres and its coefficient jumps from 4,500 to
+~48,000 on identical data with identical predictions. A number that moves when
+you change units cannot measure importance.
+
+Fix: standardize before fitting, so every coefficient answers "how much does
+price move per one-standard-deviation increase?" Even then:
+
+  - Precision differs. 0.6 ± 0.5 is a shrug; 0.2 ± 0.02 is a finding.
+  - Correlated features split credit arbitrarily and can swap ranks on a refit.
+  - A big per-unit effect on a rare feature explains little. "Has helipad" may
+    add ₹50 lakh, but if 3 houses in 10,000 have one, it explains nothing.
+
+
+8. INTERACTIONS
+--------------------------------------------------------------------------------
+Plain MLR assumes each feature's effect is constant regardless of the others.
+Often false.
+
+    A 10% discount lifts sales far more during the festival season than in a dead
+    week. The effect of discount DEPENDS ON season.
+
+An additive model must pick one average discount effect for December and March
+alike, overstating one and understating the other, and no amount of data fixes
+it. The fix is a product column:
+
+    sales = β₀ + β₁·discount + β₂·festival + β₃·(discount × festival)
+
+With β₁ = 400 and β₃ = 900, a point of discount buys 400 units normally and 1,300
+during a festival. Still linear regression — the new column is just a column.
+(Same shape: drug dose × body weight, ad spend × channel.)
+
+Two catches. Main effects become conditional: β₁ now means "the effect of
+discount when festival = 0", which is fine here but nonsense for something like
+area × distance_to_metro, where it becomes "the value of a sqft at zero distance
+from the metro". Centring the features first fixes that. And interactions
+multiply — 10 features have 45 pairs — so add the ones you have a reason to
+expect, not every combination.
+
+The same trick handles curvature (add area²), which is ../PLR/concept.txt.
+
+
+9. DIAGNOSTICS WITHOUT THE SCATTER PLOT
+--------------------------------------------------------------------------------
+You cannot plot y against twelve features, so you read residuals instead.
+
+  - Residuals vs fitted — the general-purpose plot. Cheap houses predicted within
+    ₹2 lakh while ₹2-crore houses are off by ₹40 lakh is a funnel: errors grow
+    with the prediction. Predictions stay unbiased, but the standard errors are
+    wrong. Common fix: model log(price), turning "off by ₹40 lakh" into "off by
+    15%".
+  - Residuals vs each feature — localizes it. A U-shape against age_of_property
+    (under-pricing new AND heritage homes, over-pricing 20-year-olds) says the
+    age effect is curved; add age².
+  - Q-Q plot — only matters when quoting p-values. A long right tail from a few
+    luxury sales makes inference unreliable while predictions stay fine.
+  - Correlation matrix and VIF, BEFORE fitting. Seeing VIF 12 across area, rooms
+    and bathrooms warns you not to trust those coefficients before you write a
+    conclusion you must retract.
+  - Leverage and Cook's distance. A listing with 5 bedrooms and 600 sqft is
+    unremarkable on each feature alone but impossible in combination — no
+    single-feature check catches it, and it can tilt the whole hyperplane.
+
+
+10. WHEN MLR IS THE RIGHT TOOL
+--------------------------------------------------------------------------------
+Use it when:
+  - Drivers contribute roughly additively — electricity demand from temperature,
+    day of week and holiday flags.
+  - You must defend the model. A bank rejecting a loan has to say why; a boosted
+    forest with the same accuracy may be unusable in that setting.
+  - You need the effect, not the prediction — "what does a day of delivery delay
+    cost in repeat purchases, holding order value fixed?" is a question about a
+    coefficient.
+  - You want a baseline. If the deep model beats it by 2%, ship the simple one.
+
+Use something else when:
+  - Effects are curved or heavily interacting — taxi fare from pickup and dropoff
+    coordinates has no sensible additive effect of "latitude". Use trees.
+  - Features are collinear and you need interpretation — marketing mix where TV,
+    radio and digital all rise together. Ridge, drop channels, or experiment.
+  - d approaches n — 20,000 genes, 200 patients. Regularization is mandatory.
+  - The target is not continuous — "will this customer churn?" Linear regression
+    will happily predict a 130% probability. Use logistic regression.

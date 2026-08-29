@@ -1,0 +1,177 @@
+STAGE 4a: DATA SPLITTING, CROSS-VALIDATION AND LEAKAGE
+================================================================================
+
+If you get this wrong, every number you report afterwards is fiction. This is
+the highest-leverage model-agnostic topic in the whole lifecycle, and it is a
+guaranteed interview area.
+
+--------------------------------------------------------------------------------
+1. WHY WE SPLIT: THE THREE ROLES
+--------------------------------------------------------------------------------
+
+    Train        fit parameters
+    Validation   choose hyperparameters, features, model family, threshold
+    Test         estimate generalisation ONCE, at the end
+
+The validation set is consumed by selection. Every time you look at it and
+change something, you fit to it a little. After 200 experiments your validation
+score is optimistically biased - this is the multiple-comparisons problem, not
+a metaphor. That is precisely why the test set exists and why it must be touched
+once. If you touch it twice, it has become a validation set and you no longer
+have an unbiased estimate.
+
+Rules of thumb for sizes: with 10k-1M rows, 60/20/20 or 70/15/15 is fine. With
+100M rows a 1% test set is plenty - what matters is the ABSOLUTE number of
+minority-class examples in the test set, not the percentage. Work backwards from
+the confidence interval you need: to distinguish 90% from 91% accuracy you need
+on the order of 10k test examples.
+
+--------------------------------------------------------------------------------
+2. CHOOSING THE SPLIT STRATEGY
+--------------------------------------------------------------------------------
+
+Ask one question: "what does the model have to generalise ACROSS at serving
+time?" Split along exactly that axis.
+
+    New rows from the same population   -> random split
+    Future time periods                 -> time-based split
+    New users / patients / devices      -> group (entity) split
+    New locations / stores / languages  -> group split on that key
+    Rare classes                        -> stratified split
+    Combination                         -> grouped + time (most real systems)
+
+Random split when the data is temporal or grouped is the classic disaster: the
+model memorises entity-specific quirks or peeks at the future and reports a
+score it will never reproduce.
+
+--------------------------------------------------------------------------------
+3. CROSS-VALIDATION VARIANTS
+--------------------------------------------------------------------------------
+
+K-Fold (k = 5 or 10)
+    Split into k folds, train on k-1, validate on 1, rotate, average.
+    Uses all data for both roles; reduces the variance of the estimate.
+    Cost: k trainings. Bias-variance of the estimator: small k -> pessimistic
+    bias (less training data per fold) but lower variance; large k -> less bias,
+    higher variance and higher cost. k=5 or 10 is the empirical sweet spot.
+
+Stratified K-Fold
+    Preserves class proportions in every fold. Default for classification,
+    mandatory for imbalanced data - with 1% positives and k=10, plain K-Fold can
+    produce a fold with almost no positives and a meaningless metric.
+
+Leave-One-Out (LOOCV)
+    k = n. Nearly unbiased, but very high variance and n trainings. Only for
+    tiny datasets. The models are nearly identical to each other, so their
+    errors are highly correlated - which is exactly why the variance is high.
+
+Repeated K-Fold
+    Run K-Fold with several different shuffles and average. Reduces the variance
+    caused by one unlucky partition. Cheap insurance on small data.
+
+Group K-Fold
+    All rows of a group (user, patient, session, document) land in the same
+    fold. Use whenever rows are not independent. StratifiedGroupKFold when you
+    need both.
+
+Time Series Split (forward chaining / rolling origin)
+        fold 1: train [1..100]  test [101..120]
+        fold 2: train [1..120]  test [121..140]
+        fold 3: train [1..140]  test [141..160]
+    Expanding window (as above) or sliding window (fixed-length train, better
+    when old data is stale). Never shuffle time series.
+
+Purging and embargo (finance, and any dataset with overlapping label windows)
+    If a label at time t is computed over [t, t+30d], then training rows within
+    30 days before the test boundary contain information overlapping the test
+    labels. Purge those rows, and additionally embargo a gap after the boundary
+    to account for serial correlation. Without this, a time split still leaks.
+
+Nested cross-validation
+    Outer loop estimates generalisation; inner loop tunes hyperparameters
+    separately inside each outer fold. This is the correct way to report a
+    performance estimate for a TUNED model. A single CV loop that both tunes and
+    reports is optimistically biased. Cost is k_outer * k_inner trainings, so it
+    is used mainly on small data or when the reported number matters (papers,
+    regulated settings). In industry, a clean held-out test set usually replaces
+    the outer loop.
+
+--------------------------------------------------------------------------------
+4. THE LEAKAGE TAXONOMY
+--------------------------------------------------------------------------------
+
+Leakage = information in training that will not be available (or is a function
+of the answer) at prediction time. Four families:
+
+(a) Target leakage
+    A feature computed from, or after, the outcome. `refund_issued` for fraud,
+    `discharge_summary` for readmission, `days_to_cancel` for churn. Detection:
+    absurdly high single-feature AUC; the "one second before prediction" test.
+
+(b) Train-test contamination (preprocessing leakage)
+    Any statistic fitted on data outside the training fold:
+        - scaler mean/std or min/max over the whole dataset
+        - imputation values over the whole dataset
+        - target encoding of a categorical over the whole dataset (the worst
+          offender - it encodes the label directly; use out-of-fold or smoothed
+          target encoding computed inside each fold)
+        - feature selection performed before splitting (selecting the top-k
+          features by correlation with the target on all data is leakage even
+          though it never touches a label at training time)
+        - oversampling/SMOTE applied before splitting, so synthetic copies of
+          validation points sit in the training set
+    The fix is structural, not disciplinary: put every transformation inside a
+    Pipeline and fit the Pipeline inside the CV loop. Then leakage is impossible
+    by construction.
+
+(c) Temporal leakage
+    Random splitting time-ordered data; using features that aggregate the full
+    history including the future; label windows overlapping the split boundary
+    (see purging above).
+
+(d) Group / duplicate leakage
+    The same entity in train and test: multiple visits by one patient, near-
+    duplicate documents, augmented copies of the same image, multiple sessions
+    of one user. Deduplicate first, then split by group.
+
+A useful heuristic: if your score jumps when you make a change that "shouldn't
+matter that much", you have probably just introduced leakage rather than a
+breakthrough.
+
+--------------------------------------------------------------------------------
+5. VALIDATION SET DESIGN BEYOND THE MECHANICS
+--------------------------------------------------------------------------------
+
+- The validation set should mirror serving conditions: same population, same
+  class balance, same feature availability. If you downsampled negatives for
+  training, DO NOT downsample the validation/test set - evaluate on the natural
+  base rate, or your precision estimates are inflated.
+- Keep a permanent "golden set": a hand-curated, carefully labelled evaluation
+  set including known hard cases and important slices. It changes slowly and is
+  never trained on. It is what protects you when the auto-generated test set
+  drifts.
+- For final honesty, hold out the MOST RECENT period as the test set even if you
+  cross-validate on the rest. That is the closest offline proxy for "will it work
+  next month".
+- Report a confidence interval, not just a point estimate. Bootstrap the test
+  set (resample with replacement, recompute the metric, take the 2.5/97.5
+  percentiles). Two models 0.3 points apart on a 2000-row test set are not
+  distinguishable, and saying so is a senior signal.
+- For model comparison on the same data, prefer paired tests: McNemar's test for
+  two classifiers on the same test set, or a paired t-test / Wilcoxon across CV
+  folds (with the caveat that CV folds are not independent, so the standard
+  t-test is anti-conservative).
+
+--------------------------------------------------------------------------------
+6. WHEN CV IS THE WRONG TOOL
+--------------------------------------------------------------------------------
+
+- Massive data: a single large held-out split is cheaper and statistically
+  sufficient. CV is a small-data variance-reduction technique.
+- Expensive training (large models): use one split plus early stopping on a
+  validation set.
+- Strong non-stationarity: averaging folds across periods hides the trend you
+  care about. Use rolling-origin backtests and look at the per-period curve, not
+  the mean.
+- Online systems: the only real validation is an A/B test. Offline CV ranks
+  candidates; the experiment decides. See 11_deployment_and_serving.txt.

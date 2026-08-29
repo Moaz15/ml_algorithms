@@ -1,0 +1,177 @@
+STAGE 7b: MODEL INTERPRETABILITY AND EXPLAINABILITY
+================================================================================
+
+--------------------------------------------------------------------------------
+1. WHY, AND FOR WHOM
+--------------------------------------------------------------------------------
+
+"Explainability" is not one need. Identify the audience first, because it
+determines the method:
+
+    Debugging (you)          is the model using a leaked or nonsensical feature?
+                             Global importance + local explanations of errors.
+    Trust / adoption (the    "why was this customer flagged?" Needs a short,
+    business user)           stable, human-readable reason.
+    Regulation (legal)       adverse action notices (credit), GDPR-style
+                             explanation expectations, model risk management
+                             (SR 11-7). Often demands an inherently
+                             interpretable model or a documented, validated
+                             explanation process.
+    Recourse (the subject)   "what would I have to change to be approved?"
+                             Counterfactual explanations, not attributions.
+    Science (the analyst)    "what causes what?" Attribution methods DO NOT
+                             answer this. You need causal inference.
+
+Global (how does the model behave overall) vs local (why this one prediction) is
+the second axis. Most tools do one well and the other badly.
+
+--------------------------------------------------------------------------------
+2. INHERENTLY INTERPRETABLE MODELS
+--------------------------------------------------------------------------------
+
+Prefer these when the accuracy cost is small - it usually is on tabular data
+with good features.
+
+    Linear / logistic regression   coefficients are conditional effects; for
+        logistic, exp(coef) is an odds ratio. Only comparable if standardised,
+        and meaningless under multicollinearity.
+    Decision tree (shallow)        a readable rule path. Unstable: a small data
+        change can restructure the tree, so "the explanation" is not stable
+        across retrains.
+    Rule lists / scorecards        the credit-industry standard; monotone,
+        auditable, easy to override.
+    GAMs and EBMs (explainable boosting machines)   y = sum of learned smooth
+        shape functions per feature (plus optional pairwise terms). Each shape
+        function is plottable and exact. Often within a point or two of a GBM on
+        tabular data and fully inspectable - the strongest "interpretable and
+        accurate" answer available and a great thing to name in an interview.
+    Monotonic constraints          not an explanation method, but they make a
+        black box behave sensibly ("more income never increases risk"), which
+        is often what stakeholders actually want.
+
+--------------------------------------------------------------------------------
+3. POST-HOC GLOBAL METHODS
+--------------------------------------------------------------------------------
+
+Permutation importance, MDI, drop-column importance - see
+05_feature_selection.txt section 5 for what each measures and its biases.
+
+Partial Dependence Plot (PDP)
+    Average predicted response as one feature is varied over its range, with all
+    other features held at their observed values and averaged out.
+    Shows the average marginal effect.
+    Two serious caveats: it assumes the varied feature is INDEPENDENT of the
+    others (otherwise you are averaging the model over impossible combinations -
+    2m tall and 40kg), and averaging can hide opposite effects in two subgroups,
+    producing a flat line for a strongly influential feature.
+
+Individual Conditional Expectation (ICE)
+    One line per instance instead of the average. Directly exposes the
+    heterogeneity that a PDP hides. Always plot ICE with PDP.
+
+Accumulated Local Effects (ALE)
+    Uses local differences within small intervals of the feature instead of
+    marginalising globally, so it is unbiased under correlated features. The
+    right default when features are correlated, and a good answer to "what is
+    wrong with PDP".
+
+Global surrogate
+    Fit an interpretable model (shallow tree, linear) to the black box's
+    PREDICTIONS. Report the surrogate's fidelity (R^2 against the black box); a
+    low-fidelity surrogate is a story, not an explanation.
+
+--------------------------------------------------------------------------------
+4. LOCAL METHODS: LIME AND SHAP
+--------------------------------------------------------------------------------
+
+LIME (Local Interpretable Model-agnostic Explanations)
+    Perturb the instance, get black-box predictions for the perturbations,
+    weight them by proximity to the instance, and fit a sparse linear model
+    locally. The linear coefficients are the explanation.
+    Strengths: model-agnostic, works on tabular, text and images, cheap, output
+    is intuitive and short.
+    Weaknesses: unstable (re-running with different random perturbations can
+    change the explanation), depends heavily on the kernel width defining
+    "local", perturbations can be off-manifold and unrealistic, and there is no
+    guarantee the local surrogate is faithful. Good for a quick look, weak as
+    evidence.
+
+SHAP (SHapley Additive exPlanations)
+    Treats features as players in a cooperative game and distributes the
+    prediction among them using Shapley values: the average marginal
+    contribution of a feature over all possible orderings of the features.
+        f(x) = base_value + sum_j phi_j
+    It is the unique attribution satisfying local accuracy (efficiency - the
+    contributions sum exactly to the prediction minus the base value), missing-
+    ness, and consistency (if a model changes so a feature contributes more in
+    every coalition, its attribution cannot decrease). That uniqueness result is
+    why SHAP displaced ad hoc importance measures.
+
+    Variants: KernelSHAP (model-agnostic, slow, approximate), TreeSHAP (exact
+    and polynomial-time for tree ensembles - the reason SHAP is ubiquitous in
+    tabular ML), DeepSHAP/GradientSHAP for neural nets, LinearSHAP for linear
+    models.
+
+    Standard plots: waterfall / force (one prediction), beeswarm (global view of
+    magnitude and direction per feature), dependence plot (SHAP value vs feature
+    value, coloured by an interacting feature), bar of mean |SHAP| (global
+    importance).
+
+    Weaknesses, and you should know them:
+      - Exact Shapley computation is exponential; everything practical is an
+        approximation except TreeSHAP.
+      - The "interventional vs conditional" choice matters. Interventional
+        (marginal) SHAP breaks feature correlations and evaluates the model on
+        unrealistic points; conditional SHAP respects the data distribution but
+        spreads credit to correlated features that the model never used. There
+        is no free lunch here; state which one you used.
+      - Correlated features split credit, so a feature's SHAP value is not "how
+        much this feature matters in the world".
+      - Additivity in feature space does not imply causality. SHAP explains the
+        model, and if the model learned a spurious correlation, SHAP will
+        faithfully explain the spurious correlation.
+      - It can be manipulated: models can be constructed that hide bias from
+        post-hoc explainers.
+
+--------------------------------------------------------------------------------
+5. COUNTERFACTUALS AND RECOURSE
+--------------------------------------------------------------------------------
+
+"What is the smallest change to x that flips the decision?" This is often what a
+user actually wants and what regulators mean by an explanation.
+
+Requirements for a useful counterfactual: it must be actionable (do not tell
+someone to change their age), plausible (on the data manifold), sparse (few
+features changed), and diverse (offer several routes). DiCE and similar tools
+optimise for exactly these properties.
+
+Related: anchors (high-precision if-then rules that pin a prediction),
+influence functions (which TRAINING points most affected this prediction -
+excellent for finding mislabelled data), and prototypes/criticisms.
+
+--------------------------------------------------------------------------------
+6. DEEP-MODEL SPECIFICS (BRIEF)
+--------------------------------------------------------------------------------
+
+Saliency maps and gradient-based attributions (Integrated Gradients, Grad-CAM)
+for vision; attention weights for sequence models - with the caveat, well
+established in the literature, that attention is NOT reliably an explanation.
+Sanity-check any saliency method with randomisation tests (does the explanation
+change when model weights are randomised? if not, it is an edge detector).
+
+--------------------------------------------------------------------------------
+7. USING EXPLANATIONS RESPONSIBLY
+--------------------------------------------------------------------------------
+
+    - Explanations are diagnostics, not proof. Validate a hypothesis they
+      suggest with an intervention: drop the feature and retrain, or run an
+      experiment.
+    - Fidelity first: report how well the explanation approximates the model.
+    - Stability: run the explainer twice with different seeds/backgrounds. An
+      explanation that changes is not an explanation.
+    - Cost: SHAP on every request is often too slow; precompute for batch
+      scoring, use TreeSHAP, or cache reason codes.
+    - Do not use attributions to make causal claims or to set policy. Use them
+      to find bugs, build trust, and satisfy documentation requirements.
+    - Feed explanations into error analysis (10_...) - the highest-value use is
+      explaining the model's WRONG predictions, not its right ones.

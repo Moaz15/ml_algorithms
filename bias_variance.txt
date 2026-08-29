@@ -1,300 +1,446 @@
-1. What is Prediction Error?
-
-When a model predicts something, the error can come from three places:
-
-Irreducible Error
-Noise in the data (randomness).
-Cannot be removed — even a perfect model cannot fix it.
-
-Bias Error
-Error because the model is too simple or makes wrong assumptions.
-
-Variance Error
-Error because the model is too sensitive to training data.
-
-Total Error = Bias² + Variance + Irreducible Error
-This is called Bias-Variance Decomposition.
-
-Why Bias² Appears in the Formula
-
-Think of Bias as:
-The average difference between the model’s predictions and the true value.
-
-Bias = E[prediction] – true_value
-But in the final error decomposition, we need the squared error, because:
-Machine learning loss functions use squared error
-For regression:
-Loss = (prediction – true_value)²
-So when we break this loss into components, the Bias term naturally becomes Bias².
-
-| Term      | Meaning                                                             |
-| --------- | ------------------------------------------------------------------- |
-| **Bias**  | The amount by which the model’s predictions are wrong *on average*. |
-| **Bias²** | The contribution of biased predictions to total squared error.      |
-
-Why is it not written as “Variance²”?
-Because Variance itself is already a squared quantity in statistics.
-
-Variance = E[(prediction – mean_prediction)²]
-
-The difference between the average prediction and true value gives Bias²
-The spread of predictions around the average gives Variance
-
-2.1 What is Bias?
-
-Bias is the error caused by incorrect assumptions made by the model.
-Model is too simple → cannot capture patterns → gives wrong predictions consistently.
-
-Imagine trying to fit a straight line to a curved pattern.
-The line cannot bend → so it will always be off → systematic error.
-That systematic error is bias.
-
-Characteristics of High Bias Models
-
-Model is too simple
-Underfits the data
-Gives similar predictions even when the input changes
-Training error is high
-Test error is also high
-Model doesn't learn enough patterns
-
-Examples
-| Model                                    | Why High Bias?                            |
-| ---------------------------------------- | ----------------------------------------- |
-| **Linear Regression** on non-linear data | Model is too simple                       |
-| **Shallow Decision Tree**                | Not enough splits to learn patterns       |
-| **Under-trained Neural Network**         | Not enough parameters                     |
-| **Strong regularization (L2 very high)** | Forces weights to be small → underfitting |
-
-Effects of High Bias
-
-Predictions are consistently wrong
-Model is “rigid”
-Doesn’t adapt well to data
-Poor performance on both training and testing sets
-
-High bias symptoms:
-
-💢 Training error: High
-💢 Validation error: High
-
-Gap between them: Small
-Why?
-The model is bad at learning → even training data errors are high.
-
-| Technique                                       | Why it helps                                |
-| ----------------------------------------------- | ------------------------------------------- |
-| **Increase model complexity**                   | Model can learn more patterns               |
-| **Add more features**                           | More information to learn from              |
-| **Add polynomial features**                     | Captures curves                             |
-| **Reduce regularization (L1/L2)**               | Allows larger weights → more flexible model |
-| **Use deeper decision trees / neural networks** | More capacity                               |
-
-
-3.1 What is Variance?
-
-Variance is the error caused by too much sensitivity to the training data.
-The model learns the noise → changes its prediction too much depending on the dataset.
-
-Imagine you train the same model on 5 slightly different datasets.
-
-A high-variance model will:
-Give 5 very different answers
-
-A low-variance model will:
-Give almost the same answer every time
-
-Characteristics of High Variance Models
-
-Model is too complex
-Overfits training data
-Captures noise instead of patterns
-Very low training error
-Very high test error
-Predictions fluctuate a lot
-
-
-Examples of High Variance Models
-| Model                                             | Why High Variance?   |
-| ------------------------------------------------- | -------------------- |
-| **Deep decision trees**                           | They memorize data   |
-| **kNN with k = 1**                                | Perfect memorization |
-| **Very deep neural networks (under regularized)** | Too many parameters  |
-| **Polynomial regression with high degree**        | Overfits curve       |
-| **Boosted models with too many rounds**           | Fits noise           |
-
-Effects of High Variance
-
-Training accuracy = HIGH
-Validation accuracy = LOW
-Unstable predictions
-Overfitting the training data
-Poor generalization
-
-High variance symptoms:
-
-Training error: LOW
-Validation error: HIGH
-Gap between them: LARGE
-
-This means the model memorized the training data.
-
-
-How to Reduce Variance
-
-1. Get More Data
-The BEST fix for variance.
-
-✔ 2. Use Regularization
-L1 (Lasso)
-L2 (Ridge)
-ElasticNet
-Reduces weights → reduces model flexibility.
-
-3. Reduce Model Complexity
-
-Prune decision trees
-Reduce neural network layers
-Lower polynomial degree
-
-4. Use Ensemble Techniques
-| Method                      | How it reduces variance                             |
-| --------------------------- | --------------------------------------------------- |
-| **Bagging**                 | Averages noisy models                               |
-| **Random Forest**           | Random sampling reduces dependency on training data |
-| **Dropout (Deep Learning)** | Prevents neurons from co-adapting                   |
-
-
-5. Feature Selection / Feature Reduction
-
-Removes noisy features
-Use PCA, autoencoders
-
-
-Bias–Variance Tradeoff
-
-4.1 What is the Tradeoff?
-Bias and Variance behave opposite to each other.
-
-Increase model complexity →
-Bias ↓
-Variance ↑
-
-✔ Decrease model complexity →
-Bias ↑
-Variance ↓
-
-You cannot reduce both at the same time.
-Finding the sweet spot is the tradeoff.
-
-Bias decreases as complexity increases
-Variance increases as complexity increases
-Total error is minimum where the two curves meet
-
-Underfitting vs Overfitting
-| Situation        | Cause         | Error Pattern                     |
-| ---------------- | ------------- | --------------------------------- |
-| **Underfitting** | High bias     | High train error, high test error |
-| **Overfitting**  | High variance | Low train error, high test error  |
-
-4.3 Why does the tradeoff exist?
-
-Because:
-Simple models cannot learn enough → high bias
-Complex models learn too much including noise → high variance
-Both extremes are bad.
-
-4.4 How to Balance the Tradeoff
-
-Model complexity (trees depth, polynomial degree, NN layers)
-
-Regularization (L1/L2)
-More regularization → high bias, low variance
-Less regularization → low bias, high variance
-
-Number of samples
-More data → reduces variance
-Doesn’t reduce bias
-
-Ensemble methods
-Bagging → reduces variance
-Boosting → reduces bias
-
-Hyperparameter tuning
-Use cross-validation to find the best:
-Depth
-Number of layers
-Learning rate
-λ (regularization strength)
-
-
-Mathematical View — Bias–Variance Decomposition
-
-E[(ŷ – y)²] = Bias² + Variance + Irreducible Error
-
-ŷ = model prediction
-y = true value
-
-y = f(x) + ε
-ŷ = f̂(x)
-
-prediction error:
-E[(f̂(x) – y)²]
-E[(f̂(x) – (f(x) + ε))²]
-E[(f̂(x) – f(x) – ε)²]
-(a – b – c)² = (a – b)² + c² – 2(a – b)c
-E[(f̂(x) – f(x))²]  + E[ε²]  – 2E[(f̂(x) – f(x)) ε]
-
-But since ε is noise independent of the model and has mean 0:
-E[(f̂(x) – f(x)) ε] = 0
-
-E[(f̂(x) – f(x))²] + E[ε²]
-E[ε²] = σ²   (irreducible noise)
-
-Total Error = E[(f̂(x) – f(x))²] + σ²
-E[(f̂(x) – E[f̂(x)] + E[f̂(x)] – f(x))²]
-
-How Model Complexity Affects Bias & Variance
-
-Model complexity = ability of the model to learn flexible patterns.
-Examples of increasing complexity:
-
-Linear regression → polynomial regression
-Shallow tree → deep tree
-Small NN → big NN
-Few parameters → many parameters
-
-Examples of Models and Their Bias–Variance Behavior
-
-Linear Regression
-Low complexity → High bias, Low variance
-Won’t fit curves
-
-Polynomial Regression
-High degree → Low bias, High variance
-Can overfit noise
-
-Decision Trees
-Shallow tree → High bias, Low variance
-Deep tree → Low bias, High variance (memorizes data)
-
-Random Forest
-Reduces variance using averaging
-Bias stays low
-Powerful and stable
-
-Boosting (XGBoost, LightGBM)
-Reduces bias by sequential corrections
-Can increase variance if not regularized
-
-Neural Networks
-Small network → High bias
-Large network → Low bias, High variance
-Regularization helps balance
-
-
-
-
-
-
-
+BIAS-VARIANCE: CONCEPTS, DECOMPOSITION, DIAGNOSIS, CONTROL, AND INTERVIEW Q&A
+================================================================================
+
+--------------------------------------------------------------------------------
+1. THE SETUP (the thing most people skip, and every follow-up question hangs on)
+--------------------------------------------------------------------------------
+
+Data generating process:
+    y = f(x) + e ,   E[e] = 0 ,   Var(e) = sigma^2
+
+f(x) is the true (unknown) function. e is noise: everything that affects y but
+is not a function of x (unmeasured features, measurement error, true randomness).
+
+We draw a training set D of size n, fit a model, and get f_hat_D(x).
+
+Key point: f_hat is a random object. Its randomness comes from D (and from any
+stochastic training: init, SGD order, bootstrap sampling). So when we talk about
+bias and variance we are averaging over hypothetical re-draws of the training
+set, at a FIXED test point x. 
+
+Bias and variance are properties of a
+(model + algorithm + training-set-size) triple, not of a single fitted model.
+
+    Bias(x)     = E_D[f_hat_D(x)] - f(x)      -> systematic, average-case error
+    Variance(x) = E_D[(f_hat_D(x) - E_D[f_hat_D(x)])^2]  -> instability
+    sigma^2                                   -> irreducible / Bayes error
+
+Analogy: shooting at a target with a rifle over many trials.
+    High bias      = tight cluster, off-centre  (consistent, wrong)
+    High variance  = spread out, centred        (right on average, unreliable)
+    Both high      = spread out and off-centre
+    Both low       = the goal
+
+--------------------------------------------------------------------------------
+2. THE DECOMPOSITION (full derivation, squared-error loss)
+--------------------------------------------------------------------------------
+
+Expected test error at a point x, over both noise and training sets:
+
+    E[(y - f_hat(x))^2]
+
+Step 1: substitute y = f(x) + e and add/subtract nothing yet.
+    = E[(f(x) + e - f_hat(x))^2]
+
+Step 2: split into (f - f_hat) and e. Since e is independent of D and E[e] = 0,
+the cross term vanishes:
+    = E[(f(x) - f_hat(x))^2] + E[e^2] - 2 E[(f(x) - f_hat(x)) e]
+    = E[(f(x) - f_hat(x))^2] + sigma^2                (cross term = 0)
+
+Step 3: inside the first term, insert the mean prediction
+m(x) = E_D[f_hat(x)]:
+    E[(f(x) - m(x) + m(x) - f_hat(x))^2]
+    = (f(x) - m(x))^2                      <- constant, no expectation needed
+      + E[(m(x) - f_hat(x))^2]
+      + 2 (f(x) - m(x)) E[m(x) - f_hat(x)]
+
+Step 4: the cross term is 0 because E[f_hat(x)] = m(x) by definition.
+
+    E[(y - f_hat(x))^2] = Bias(x)^2 + Variance(x) + sigma^2
+
+Both cross terms dying is the whole trick, and both die for the same reason:
+a mean-zero deviation multiplied by a constant has expectation zero.
+
+Why Bias^2 but not Variance^2:
+  - The loss is squared, so the average miss (a signed distance) enters squared.
+  - Variance is ALREADY defined as an expectation of a square, so it enters
+    linearly. Squaring it again would be a dimensional error.
+
+Consequences worth memorising:
+  - Error is additive: you can trade one term for another.
+  - sigma^2 is a floor. No model, no amount of data, no tuning goes below it.
+    A test error at the noise floor means you are done, not that you failed.
+  - The decomposition is pointwise in x; report the average over the input
+    distribution for a global picture. Bias can be high in one region and low
+    in another (e.g. a linear fit to a curve: biased at the extremes).
+  - This clean form is specific to squared error. See section 8.
+
+3. BIAS
+--------------------------------------------------------------------------------
+Error from wrong assumptions: the hypothesis class simply cannot represent f, so
+even the best member of it is off. Fitting a straight line to a curve is the
+canonical picture: the line cannot bend, so it is wrong in a repeatable way.
+
+Underfitting = the symptom. High bias = the cause.
+
+Symptoms
+    Training error   : HIGH
+    Validation error : HIGH
+    Gap              : SMALL
+    Predictions barely move when the input changes; the model looks "rigid".
+Reason the gap is small: the model is too weak to memorise, so it fails
+consistently on both sets.
+
+High-bias sources
+    Linear/logistic regression on non-linear data     class too restrictive
+    Shallow decision tree, small max_depth            too few splits
+    Naive Bayes                                       strong independence assumption
+    Large L1/L2 penalty (large lambda)                weights pushed toward 0
+    kNN with very large k                             over-smoothed neighbourhoods
+    Under-trained network / too few epochs            optimisation bias, not just class bias
+    Aggressive feature dropping / heavy PCA truncation  information thrown away
+
+Fixes
+    Increase capacity                    deeper trees, more layers/units, higher degree
+    Better features                      interactions, polynomials, domain features
+    Reduce regularisation                lower lambda, less dropout
+    Train longer / better optimiser      if the bias is optimisation-induced
+    Switch model family                  linear -> tree/kernel/net
+    Boosting                             sequential residual fitting attacks bias directly
+    NOT more data                        see section 6
+
+--------------------------------------------------------------------------------
+4. VARIANCE
+--------------------------------------------------------------------------------
+
+Error from sensitivity to the particular training sample. The model fits noise
+and idiosyncrasies, so retraining on a slightly different sample gives a
+noticeably different function.
+
+Mental test: train the same pipeline on 5 bootstrap samples. High variance means
+5 visibly different models and 5 different predictions for the same x.
+
+Overfitting = the symptom. High variance = the cause.
+
+Symptoms
+    Training error   : LOW  (can be ~0)
+    Validation error : HIGH
+    Gap              : LARGE
+    Unstable predictions, unstable feature importances, unstable coefficients
+    (also a classic multicollinearity signature in linear models).
+
+High-variance sources
+    Fully grown decision tree                  memorises the sample
+    kNN with k = 1                             prediction is one noisy point
+    High-degree polynomial regression          wild between data points
+    Large unregularised network                capacity >> signal
+    Boosting run for too many rounds           starts fitting residual noise
+    Many features relative to n (p >> n)       high-dimensional instability
+    Small n                                    variance scales roughly like 1/n
+
+Fixes, roughly in order of effectiveness
+    More data                       the cleanest fix; variance falls with n
+    Regularisation                  L2/ridge, L1/lasso, elastic net, dropout,
+                                    weight decay, early stopping, label smoothing
+    Reduce capacity                 prune, cap depth, lower degree, fewer units
+    Bagging / random forests        average away the noise (see 5.2)
+    Feature selection / PCA         cut noisy or redundant dimensions
+    Data augmentation               synthetic sample diversity
+    Cross-validated tuning          stop choosing hyperparameters on one split
+
+--------------------------------------------------------------------------------
+5. THE TRADEOFF
+--------------------------------------------------------------------------------
+
+5.1 Why it exists
+Capacity is one dial. Turning it up lets the model track the training sample
+more closely: it can represent f better (bias down) but it also tracks the noise
+in that particular sample (variance up). Turning it down does the reverse.
+
+    complexity UP    -> bias DOWN, variance UP
+    complexity DOWN  -> bias UP,   variance DOWN
+
+Total error is U-shaped in complexity. The optimum is where the marginal bias
+reduction equals the marginal variance increase, i.e. where d(Bias^2)/dc =
+-d(Var)/dc. It is NOT "where the two curves cross" -- that is a common
+mis-statement; the curves crossing is a coincidence of scale.
+
+Underfitting vs overfitting
+    Underfitting   high bias       high train error, high test error, small gap
+    Good fit       balanced        low-ish train error, test error near it
+    Overfitting    high variance   low train error, high test error, large gap
+
+Note "high bias AND high variance" is possible and common in practice: a deep
+tree on badly engineered features is unstable and still missing the signal.
+The tradeoff is a statement about moving one dial, not a conservation law.
+
+5.2 Averaging: how ensembles beat the tradeoff
+Average B models, each with variance s^2 and pairwise correlation rho:
+
+    Var(average) = rho * s^2 + (1 - rho) * s^2 / B
+
+Reading this one formula explains bagging entirely:
+  - Averaging does not change the bias (the mean of unbiased-ish models is
+    still centred the same way), so it is a pure variance play.
+  - The (1-rho)s^2/B term vanishes as B grows -> more trees never hurts.
+  - The rho*s^2 term is the floor. Bagging alone leaves trees highly correlated
+    (they see the same features), so random forests additionally sample
+    features per split to drive rho down. That, not bagging, is the RF trick.
+  - Base learners should therefore be LOW BIAS and HIGH VARIANCE: fully grown
+    trees. Averaging fixes the variance; nothing fixes bias.
+
+Boosting is the mirror image: weak, high-bias base learners (stumps) fitted
+sequentially to residuals, each reducing bias. Variance grows with rounds, so it
+needs its own brakes: learning rate/shrinkage, subsampling, tree constraints,
+early stopping on a validation set.
+
+    Bagging   parallel,   independent-ish, reduces variance, cannot fix bias
+    Boosting  sequential, dependent,       reduces bias,     can overfit
+
+5.3 Levers and which term they move
+    Model capacity            both (the main dial)
+    lambda in L1/L2           lambda up: bias up, variance down
+    k in kNN                  k up: bias up, variance down (Var ~ sigma^2/k)
+    Tree depth / min_samples  depth up: bias down, variance up
+    Boosting rounds           rounds up: bias down, variance up
+    Learning rate / shrinkage lower: slower bias reduction, lower variance
+    Early stopping            stops before the variance term takes over
+    Dropout, weight decay     variance down
+    n (sample size)           variance down, bias unchanged
+    Feature engineering       the only lever that reduces bias for free
+    Bagging                   variance down
+    Ensembling different families  usually both down (errors decorrelate)
+
+--------------------------------------------------------------------------------
+6. WHAT MORE DATA DOES AND DOES NOT DO
+--------------------------------------------------------------------------------
+
+More data shrinks variance (the model is pinned down by more evidence) and does
+nothing for bias: if the hypothesis class cannot express f, infinite data just
+gives you a precise estimate of the best wrong model. Fitting a line to a
+parabola with a billion points still returns a line.
+
+Practical corollary: if train and validation error are both high and close,
+collecting more data is a waste of money. Fix capacity or features first.
+If the gap is large, more data is the highest-value action available.
+
+--------------------------------------------------------------------------------
+7. DIAGNOSING IT IN PRACTICE
+--------------------------------------------------------------------------------
+
+Learning curves (error vs training-set size, train and validation on one plot):
+    Both curves converge HIGH, small gap        -> bias-limited
+    Large persistent gap, val still falling     -> variance-limited, get data
+    Both converge low and flat                  -> at the noise floor, done
+    Val curve rises again at the end            -> leakage or distribution shift
+
+Validation curves (error vs one hyperparameter, e.g. depth or lambda): gives the
+U directly and shows which side of the optimum you are on.
+
+Estimating the terms empirically: bootstrap the training set B times, refit, and
+at each test point compute the spread of predictions (variance estimate) and the
+gap between the mean prediction and the label (bias-plus-noise estimate). Bias
+and sigma^2 cannot be separated without knowing f, which is why you can measure
+variance but only ever bound bias.
+
+Always compare against a target:
+    human/expert error or a known Bayes rate ~ the sigma^2 proxy
+    (train error - target)      ~ avoidable bias
+    (val error - train error)   ~ variance
+    (test error - val error)    ~ overfitting to the validation set itself
+    real-world error - test     ~ distribution shift, not bias or variance
+This last row matters: bias-variance says nothing about train/test coming from
+different distributions. Mislabelling shift as "variance" leads to the useless
+prescription "get more of the wrong data".
+
+-------------------------------------------------------------------------------
+9. PER-MODEL CHEAT SHEET
+--------------------------------------------------------------------------------
+
+    Linear / logistic regression   high bias, low variance
+    Ridge (lambda > 0)             bias deliberately added; often lower TOTAL
+                                   error than OLS, which is the whole point of
+                                   regularisation -- accept bias, buy variance
+    Lasso                          same, plus sparsity (feature selection)
+    Polynomial (high degree)       low bias, very high variance
+    kNN, k=1                       ~zero bias, maximum variance
+    kNN, k large                   high bias, low variance
+    Naive Bayes                    high bias (independence), low variance,
+                                   strong when n is small
+    Decision tree, shallow         high bias, low variance
+    Decision tree, full            low bias, very high variance
+    Random forest                  low bias kept, variance averaged down
+    Boosting (XGBoost/LightGBM)    bias driven down; needs regularisation
+    SVM, large C / small gamma     large C: low bias high variance;
+                                   small gamma (wide RBF): high bias
+    Small neural network           high bias
+    Large neural network           low bias, variance controlled by
+                                   regularisation and implicit optimiser bias
+
+--------------------------------------------------------------------------------
+10. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+Expected squared test error splits into bias squared, variance, and irreducible
+noise. Bias is systematic error from a hypothesis class too restrictive to
+represent the truth; variance is error from sensitivity to the particular
+training sample; noise is the floor. Capacity trades one against the other, so
+total error is U-shaped and the job is to find the minimum -- by cross-validated
+tuning, by regularisation, and by more data when the gap is large. Ensembles
+partly escape the trade: bagging averages variance away, boosting attacks bias.
+In heavily over-parameterised deep models the naive parameter-count version of
+the curve breaks down (double descent), but the tradeoff still holds in terms of
+effective capacity.
+
+(For "explain the tradeoff", answer with this section. For "derive it", answer
+with section 2. For "why bias squared", answer with section 2.)
+
+--------------------------------------------------------------------------------
+11. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Which of the three terms can you measure in practice?
+A: Only variance cleanly -- bootstrap or reseed the training set, refit, and look
+at the spread of predictions at a fixed test point. Bias and noise cannot be
+separated without knowing the true f, so what you actually observe is
+bias-plus-noise. In practice you proxy the noise floor with human/expert error or
+a known Bayes rate, call (train error - that floor) avoidable bias, and call
+(validation error - train error) variance.
+
+Q: Train error 20%, validation error 22%. Diagnosis and action?
+A: High bias, small gap -- the model is underfitting, assuming a noise floor well
+below 20%. Increase capacity, engineer better features, reduce regularisation, or
+change model family. Collecting more data is the wrong move here and will not
+help. Caveat: if human error on this task is also ~20%, you are at the noise
+floor and the model is done.
+
+Q: Train error 1%, validation error 15%. Diagnosis and action?
+A: High variance. More data first if it is available, then regularisation
+(L2/L1, dropout, early stopping), then reduced capacity, then bagging. Also check
+for train/validation leakage or a distribution mismatch before concluding it is
+variance -- a large gap has non-variance explanations.
+
+Q: Does more data reduce bias?
+A: No. It reduces variance, roughly like 1/n, and leaves bias untouched. If the
+hypothesis class cannot express f, infinite data just gives a very precise
+estimate of the best wrong model -- a line fitted to a parabola stays a line.
+This is exactly why "collect more data" is the wrong prescription when train and
+validation error are both high and close.
+
+Q: Can a model have high bias AND high variance at once?
+A: Yes, and it is common: a deep tree on poorly engineered or noisy features is
+both unstable and missing the signal. The tradeoff describes what happens when
+you move the capacity dial on a fixed setup; it is not a conservation law that
+forbids being bad at both. Being bad at both usually points at the features or
+the data, not the capacity setting.
+
+Q: Is the total-error minimum where the bias and variance curves cross?
+A: No -- that is a widespread mis-statement. The minimum is where the marginal
+reduction in bias squared equals the marginal increase in variance, i.e. where
+their derivatives cancel. Where the two curves intersect depends on units and
+scale and has no significance.
+
+Q: How does regularisation fit the picture?
+A: It deliberately buys bias to sell variance. Ridge is a biased estimator that
+frequently beats unbiased OLS on total test MSE, which is the entire justification
+for regularising: unbiasedness is not the goal, low expected error is. Lambda is
+the dial -- lambda up means bias up and variance down. Lasso does the same and
+adds sparsity, which cuts variance further by dropping noise features.
+
+Q: How do bagging and boosting relate to bias and variance?
+A: Bagging is a pure variance play. For B models each with variance s^2 and
+pairwise correlation rho, the average has variance rho*s^2 + (1-rho)*s^2/B: the
+second term vanishes as B grows, and rho*s^2 is the floor. So more trees never
+hurt, and random forests add per-split feature sampling specifically to lower rho
+below what bagging alone achieves. Since averaging cannot fix bias, base learners
+should be low-bias/high-variance -- fully grown trees. Boosting is the mirror:
+high-bias weak learners (stumps) fitted sequentially to residuals, reducing bias,
+with variance controlled by shrinkage, subsampling and early stopping.
+Follow-up: why does a random forest not overfit as you add trees, but a boosted
+model does?
+
+Q: Why can you add trees to a random forest indefinitely but not to a boosted
+model?
+A: RF trees are fitted independently on bootstrap samples and averaged, so extra
+trees only shrink the (1-rho)s^2/B term -- the estimator converges rather than
+degrading. Boosting rounds are sequential and each one further fits the current
+residuals, so past the point where the residuals are mostly noise, extra rounds
+add variance and test error rises. That is why boosting needs a validation set
+for early stopping and RF does not.
+
+Q: Where does kNN sit, and what does k control?
+A: k = 1 has almost no bias and maximum variance -- the prediction is one noisy
+neighbour. Large k averages over a wide neighbourhood, so variance drops roughly
+like sigma^2/k while bias grows because distant, dissimilar points get included.
+k is a direct bias-variance dial, chosen by cross-validation.
+
+Q: Same question for decision trees and neural networks.
+A: Depth is the tree's dial: shallow means high bias/low variance, fully grown
+means low bias/very high variance, and pruning or min_samples_leaf pulls it back.
+For networks, width and depth reduce bias, while variance is governed by weight
+decay, dropout, early stopping and data augmentation -- and, in the very
+over-parameterised regime, by the implicit bias of the optimiser.
+
+Q: Does the decomposition hold for classification?
+A: Not in that clean additive form. Under 0-1 loss the standard generalisations
+(Kohavi-Wolpert, Domingos) give a multiplicative or sign-dependent variance term,
+with a counter-intuitive consequence: variance can HELP. If the average
+prediction is already on the wrong side of the boundary, per-model noise flips
+some predictions to the correct class and lowers error. Log-loss decomposes
+cleanly but in terms of KL divergence rather than squared distance. The intuition
+transfers across losses; the algebra does not.
+
+Q: What is double descent, and does it kill the tradeoff?
+A: Past the interpolation threshold -- roughly parameters ~ n, where training
+error hits zero -- test error can descend a second time, below the classical
+U-curve minimum. It does not kill the tradeoff; it shows that parameter count is
+the wrong measure of complexity. In that regime SGD plus weight decay selects
+smooth, near-minimum-norm interpolating solutions, so effective capacity stays
+controlled even as parameter count explodes. The tradeoff holds in terms of
+effective capacity. Practical upshot: "bigger models overfit" is not a reliable
+rule for deep nets -- measure it.
+
+Q: How does cross-validation relate to bias and variance?
+A: Two separate senses, and interviewers like to see you distinguish them.
+(1) As a tool: CV is how you locate the total-error minimum when tuning the
+capacity dial. (2) As an estimator, the CV score itself has bias and variance:
+small k trains each fold on much less data, so the error estimate is
+pessimistically biased; LOOCV is nearly unbiased but has high variance and is
+expensive. k = 5 or 10 is the usual compromise. Also, tuning heavily against one
+validation set overfits it, which is why a held-out test set stays untouched.
+
+Q: Is a large train/validation gap always variance?
+A: No. Data leakage, a distribution shift between the splits, a non-random split
+of temporally ordered data, or simply a tiny validation set can all produce the
+same signature. Bias-variance analysis assumes train and test come from the same
+distribution, so before prescribing "more data" confirm that more of the SAME
+data is what you actually lack.
+
+Q: How do learning curves let you tell bias from variance?
+A: Plot train and validation error against training-set size. Both converging
+high with a small gap is bias-limited -- more data will not move it. A large,
+persistent gap with validation error still falling is variance-limited, so more
+data is the highest-value action. Both converging low and flat means you are at
+the noise floor. Validation curves (error against one hyperparameter) show the
+U-shape directly and tell you which side of the optimum you are on.
+
+Q: Give one lever that reduces bias and variance at the same time.
+A: Better features. Adding a genuinely informative feature lets a simple, stable
+model represent f (bias down) without adding the capacity that fuels variance --
+and dropping noise features cuts variance without costing bias. Ensembling
+different model families also tends to lower both, since their errors decorrelate.
+
+Q: Do you always want to sit at the total-error minimum?
+A: Usually, but not always. Deployment sometimes prefers the low-variance side:
+stable predictions, reproducible retrains, and steady feature importances matter
+for debuggability, monitoring, fairness auditing and regulatory explanation. A
+slightly worse but stable model can beat a marginally better but jumpy one.
+
+Q: You inherit a model at 92% train, 74% test accuracy, with 500 rows and 300
+features. What do you do?
+A: p is comparable to n, so this is a variance problem before it is anything
+else. Cut dimensionality (feature selection, L1, PCA), add strong L2, drop to a
+low-capacity model, and use repeated k-fold CV rather than a single split because
+at n = 500 the split-to-split variance of the estimate is itself large. Then
+check the label noise floor to know what is even achievable, and confirm the
+split is honest (no leakage, no grouped rows spanning both sides).

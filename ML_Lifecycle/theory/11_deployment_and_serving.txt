@@ -1,0 +1,167 @@
+STAGE 8: MODEL DEPLOYMENT AND SERVING
+================================================================================
+
+--------------------------------------------------------------------------------
+1. SERIALISATION AND MODEL EXPORT
+--------------------------------------------------------------------------------
+
+    Pickle / joblib     Python-native, trivial to use, and the default for
+                        scikit-learn. Three problems: it is NOT secure
+                        (unpickling executes arbitrary code - never load an
+                        untrusted pickle), it is version-fragile (a numpy or
+                        sklearn upgrade can break loading), and it is
+                        Python-only. joblib is preferred over raw pickle for
+                        large numpy arrays.
+    ONNX                open computation-graph format; train in one framework,
+                        serve in another (ONNX Runtime in C++, C#, Java, JS).
+                        Gives portability plus graph-level optimisation and
+                        quantisation. Cost: operator coverage gaps - custom ops
+                        and exotic layers may not convert, and conversion must
+                        be numerically verified.
+    PMML                older XML standard for classical models; still common in
+                        banking/insurance because it is auditable.
+    Native formats      LightGBM/XGBoost text or JSON dumps, TensorFlow
+                        SavedModel, TorchScript, safetensors for weights (safe,
+                        no code execution).
+    Booster-to-code     compile a tree ensemble to C (Treelite, m2cgen) for
+                        very low-latency CPU serving.
+
+Whatever you use: version the artefact, record the training code commit, the
+data snapshot, and the full dependency set, and ALWAYS run a post-export
+equivalence test - score a fixed sample with the original and the exported
+model and assert the predictions match within tolerance. Conversion bugs are
+silent otherwise.
+
+Critical: the model artefact is not the deliverable. The deliverable is
+preprocessing + model + post-processing. Ship the whole pipeline as one object
+(an sklearn Pipeline, a single ONNX graph) so the transform code cannot drift
+away from the model that was trained with it.
+
+--------------------------------------------------------------------------------
+2. PACKAGING AND CONTAINERISATION
+--------------------------------------------------------------------------------
+
+    - Pin every dependency (lockfile). "It worked in the notebook" is a
+      dependency-resolution accident.
+    - Container image with the runtime, the server, and the code; the model
+      artefact either baked in (immutable, simple rollback, big images) or
+      pulled at startup from a model registry (smaller images, faster iteration,
+      but the container is no longer self-describing). Baking in is the safer
+      default for regulated or low-change-rate systems.
+    - Keep training and serving images separate; serving should not carry the
+      training stack.
+    - Health endpoints: liveness (is the process up), readiness (is the model
+      loaded and warm). Load the model at startup, not per request.
+    - Kubernetes for orchestration: replicas, autoscaling on QPS or latency
+      (not CPU alone), resource requests/limits, rolling updates and rollback.
+      Serverless (Lambda/Cloud Run) is attractive for spiky low-volume traffic
+      but cold starts hurt when the model is large.
+
+--------------------------------------------------------------------------------
+3. SERVING PATTERNS
+--------------------------------------------------------------------------------
+
+    Batch (offline) scoring
+        Score everything on a schedule, write to a table or key-value store, the
+        application reads a precomputed value. Cheapest, simplest, no latency
+        risk, easy to backfill and audit. Choose it whenever predictions can be
+        stale by hours - most recommendation, propensity, churn and CRM use
+        cases qualify. Failure mode: staleness for new entities (cold start).
+    Real-time (online) request-response
+        REST/HTTP+JSON for simplicity and ubiquity; gRPC + protobuf for lower
+        latency, streaming and strong typing between internal services. Required
+        when features depend on the request itself (fraud on this transaction,
+        search on this query).
+    Streaming
+        Consume events, score, emit to another topic. Good for continuous
+        pipelines and for near-real-time with decoupling.
+    Embedded / on-device
+        Ship the model to the client (mobile, browser, edge). Zero network
+        latency, works offline, strong privacy story. Costs: hard to update,
+        size and power constraints, and the model is now extractable by anyone.
+
+Latency engineering, in the order that usually pays:
+    - measure p50/p95/p99, not the mean; the tail is what users feel
+    - separate feature-fetch time from inference time; feature lookups are
+      usually the bottleneck, not the model
+    - batch requests (dynamic batching) for GPU serving
+    - cache: identical inputs, or precomputed embeddings for stable entities
+    - shrink the model: distillation, pruning, quantisation (int8), fewer trees
+    - a cheap model as a filter and an expensive model only for the hard cases
+      (cascade)
+
+--------------------------------------------------------------------------------
+4. FEATURES AT SERVING TIME
+--------------------------------------------------------------------------------
+
+The hardest part of deployment is usually features, not the model.
+
+    - Training/serving skew: the same feature definition must produce the same
+      value in both paths. Enforce with one shared implementation, or with a
+      feature store that materialises one definition into an offline store (for
+      point-in-time correct training data) and an online store (low-latency
+      key-value reads for serving).
+    - Feature freshness: an aggregate computed nightly is up to 24 hours stale at
+      serving time. If you trained with a "last 1 hour" window, you must be able
+      to compute that window online.
+    - Missing/unavailable features at request time need a defined fallback that
+      matches how missing values were handled in training.
+    - Log every prediction WITH the exact feature vector used, the model version
+      and the timestamp. This log is what makes debugging, monitoring, drift
+      detection and future training possible. Skipping it is the single most
+      regretted deployment shortcut.
+
+--------------------------------------------------------------------------------
+5. RELEASE STRATEGIES
+--------------------------------------------------------------------------------
+
+    Shadow (dark launch)
+        The new model receives real traffic in parallel; its predictions are
+        logged but not used. Validates infrastructure, latency and prediction
+        distribution with zero user risk. It CANNOT measure business impact,
+        because no decision changed. Always the first step for a risky model.
+    Canary
+        Route a small fraction (1-5%) of traffic to the new model, watch
+        technical and business guardrails, ramp up gradually with automatic
+        rollback on alarm. Limits blast radius.
+    A/B test (online controlled experiment)
+        Randomly assign users (not requests - assign by the unit that experiences
+        the effect) to control and treatment, measure the business KPI with a
+        proper statistical test. This is the ONLY way to establish business
+        impact. Decide sample size and duration in advance from a power
+        calculation; run at least a full weekly cycle; pre-register the primary
+        metric and guardrails; avoid peeking (or use sequential testing designed
+        for it).
+        Watch for interference between units (marketplaces, social networks,
+        shared inventory) where the treatment affects control users - then use
+        switchback tests or cluster randomisation.
+    Interleaving
+        For ranking: blend results from two rankers in one list and compare
+        clicks. Far more sensitive than A/B for search/recsys.
+    Blue-green
+        Two full environments, flip traffic instantly, flip back on failure.
+        Simple rollback, doubles infrastructure cost.
+    Multi-armed bandit
+        Adaptively shift traffic to the better variant. Maximises reward during
+        the test, but complicates inference about effect size.
+
+Ramp checklist before 100%: latency within budget, error rate flat, prediction
+distribution similar to shadow expectations, guardrail metrics not degraded,
+per-slice metrics checked, rollback tested (not just documented).
+
+--------------------------------------------------------------------------------
+6. PRE-DEPLOY CHECKLIST
+--------------------------------------------------------------------------------
+
+    [ ] pipeline (preprocessing + model + post-processing) serialised as one
+    [ ] export equivalence test passes on a fixed sample
+    [ ] input schema validation at the API boundary, with clear errors
+    [ ] defined behaviour for missing/invalid/out-of-range inputs
+    [ ] threshold and business rules externalised as config, not baked in code
+    [ ] prediction logging with model version and feature vector
+    [ ] latency and throughput load-tested at expected peak
+    [ ] monitoring dashboards and alerts exist BEFORE traffic (stage 9)
+    [ ] rollback path tested end to end
+    [ ] the previous model or a heuristic available as a fallback for outages
+    [ ] model card / documentation and a named owner
+    [ ] on-call runbook: what a page means and what to do about it
