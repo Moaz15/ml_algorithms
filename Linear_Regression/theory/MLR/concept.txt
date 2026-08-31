@@ -101,7 +101,7 @@ categories natively.
 
 6. MULTICOLLINEARITY — THE MLR-SPECIFIC FAILURE
 --------------------------------------------------------------------------------
-Features correlated with each other. Formulas and fixes: derivation Part 6.
+Features correlated with each other. Formulas and fixes: derivation Part 5.
 
 If two features move together, the data cannot tell their effects apart. An
 increase in one coefficient offset by a decrease in the other gives nearly the

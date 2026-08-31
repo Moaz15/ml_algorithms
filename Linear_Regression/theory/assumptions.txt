@@ -1,339 +1,204 @@
-Assumptions of Linear Regression 
-======================================================================
+ASSUMPTIONS OF LINEAR REGRESSION
+================================
 
-0. THE GAUSS-MARKOV THEOREM & "BLUE" — why these assumptions exist
-----------------------------------------------------------------------
-Before listing the assumptions individually, it helps to know *why* they matter.
-The Gauss-Markov theorem says: if a specific subset of assumptions holds, the
-Ordinary Least Squares (OLS) estimator is BLUE — the Best Linear Unbiased Estimator.
+WHY THESE ASSUMPTIONS EXIST
+--------------------------------------------------------------------------------
+Gauss-Markov: if assumptions 1-5 hold, OLS is BLUE — the minimum-variance
+estimator among all linear unbiased ones. Assumption 6 (normality) is NOT part of
+that; it only buys exact small-sample inference.
 
-Breaking down BLUE:
-* Linear   — the estimator is a linear function of the target values.
-* Unbiased — on average, across repeated samples, the estimated coefficients equal
-  the true population coefficients (no systematic over/under-estimation).
-* Best     — among all linear, unbiased estimators, OLS has the smallest possible
-  variance (it is the most efficient / most precise one).
+The distinction that matters more than the list itself:
 
-The key interview insight: BLUE is a statement about the *coefficients*, not about
-predictions, and not about statistical inference (p-values, confidence intervals).
-- Assumptions 1-5 below (Linearity, Zero Conditional Mean, Independence,
-  No Perfect Multicollinearity, Homoscedasticity) are the actual Gauss-Markov
-  conditions — violating them threatens whether OLS is unbiased and/or efficient.
-- Assumption 6 (Normality of Residuals) is NOT required for BLUE. It is only
-  needed to make exact hypothesis tests and confidence intervals valid in small
-  samples. In large samples, the Central Limit Theorem makes OLS coefficients
-  approximately normal even if the residuals aren't, so this assumption matters
-  less as data grows.
+    Break exogeneity (2) or linearity (1)  ->  the COEFFICIENTS are biased.
+                                               The model is confidently wrong.
+                                               More data does not help.
 
-This distinction is the single most common thing candidates get wrong: they treat
-all assumptions as equally important, when in fact violating exogeneity (bias) is
-categorically worse than violating normality (just unreliable inference).
+    Break independence (3) or             ->  the coefficients stay UNBIASED;
+    homoscedasticity (4)                      only the STANDARD ERRORS break.
+                                               Predictions are fine, p-values
+                                               and confidence intervals are not.
+
+Treating all six as equally important is the most common mistake. They are not.
 
 
-1. LINEARITY (Correct Model Specification)
-----------------------------------------------------------------------
-What it means:
-The relationship between the predictors and the target outcome follows a
-straight-line pattern (it doesn't curve, dip, or wave).
+1. LINEARITY
+--------------------------------------------------------------------------------
+The relationship is linear IN THE PARAMETERS. Curved relationships are fine as
+long as you supply the right columns (x², log x); a straight line through curved
+data is not.
 
-Real-Life Example:
-Imagine predicting "Crop Yield" based on "Rainfall".
-* Up to a certain point, more rain equals more crops (a positive linear relationship).
-* But if it rains too much, the field floods and the crop yield drops to zero.
-* If you force a straight line through this data, your model will wrongly predict
-  that endless rain equals infinite crops.
+    Crop yield vs rainfall. More rain means more crops — up to a point. Past
+    that the field floods and yield collapses. Force a straight line through it
+    and the model predicts that endless rain gives infinite crops.
 
-Impact & Fix:
-Your predictions will be systematically wrong in the extremes.
-Fix it by transforming the variable (e.g., squaring the rainfall variable to allow
-the model to learn a curve).
+Breaks: bias. The model is systematically wrong, worst at the extremes.
+Test: residuals vs fitted — a curve or U-shape means non-linearity. Ramsey RESET.
+Fix: add polynomial terms (PLR/concept.txt), transform the feature, or use a
+model that does not assume a functional form.
 
 
-2. ZERO CONDITIONAL MEAN / EXOGENEITY (No Omitted-Variable Bias)
-----------------------------------------------------------------------
-What it means:
-Formally, E[ε | X] = 0 — the error term should average out to zero at every level
-of the predictors, and should be uncorrelated with them. In plain terms: there is
-no hidden factor that affects both a predictor and the target, which the model
-doesn't know about.
+2. ZERO CONDITIONAL MEAN / EXOGENEITY
+--------------------------------------------------------------------------------
+E[ε | X] = 0 — errors average to zero at every level of the predictors. In plain
+terms: no hidden factor drives both a predictor and the target.
 
-Real-Life Example:
-Imagine predicting "Income" using "Years of Education".
-* People with more "natural ability" or family connections tend to both pursue
-  more education AND earn more, independent of what the education itself teaches.
-* "Ability" is not in the model, but it's baked into the error term, and it's
-  correlated with "Years of Education".
-* The model now over-attributes ability's effect to education, inflating the
-  education coefficient.
+    Income predicted from years of education. Natural ability and family
+    connections push people toward BOTH more education AND higher pay. Ability
+    is not in the model, so it sits in the error term correlated with education,
+    and the education coefficient absorbs its effect.
 
-Impact & Fix:
-This is more serious than the other assumptions: violating it makes the
-coefficient estimates BIASED, not just imprecise or hard to test. No amount of
-extra data fixes this — more data just gives you a more confident wrong answer.
-Fix it by identifying and including the confounding variable, using techniques
-like instrumental variables, or being explicit that the model is for prediction
-only (not causal interpretation) when the omitted variable can't be measured.
+Breaks: bias — the worst violation there is. No amount of extra data fixes it;
+more data just makes you more confident in a wrong number.
+Test: not directly testable. It is a domain-reasoning question about what you
+left out.
+Fix: include the confounder, use instrumental variables, or state explicitly that
+the model is for prediction only and its coefficients are not causal.
 
-Why this matters for interviews:
-This is the assumption that separates "my model predicts well" from "this
-coefficient tells you the causal effect of X on y." A model can have a great R^2
-while still having badly biased, non-causal coefficients.
+This is the assumption separating "my model predicts well" from "this coefficient
+is the effect of X on y". A model can have excellent R² and badly biased
+coefficients at the same time. See MLR/concept.txt section 3.
 
 
-3. INDEPENDENCE OF ERRORS (No Autocorrelation)
-----------------------------------------------------------------------
-What it means:
-The model's mistakes (errors) must not follow a predictable sequence. One error
-should not give you a clue about the next error. This usually applies to
-time-based data.
+3. INDEPENDENCE OF ERRORS (NO AUTOCORRELATION)
+--------------------------------------------------------------------------------
+One error should tell you nothing about the next. Usually an issue in time-series
+and spatial data.
 
-Real-Life Example:
-Imagine predicting "Daily Ice Cream Sales" based on the day of the week.
-* Suppose there is an unexpected week-long heatwave.
-* On Monday, your model predicts 100 sales, but you get 300 (Error: +200).
-* Because weather persists, Tuesday will likely also have a huge positive error.
-* Your model's mistakes are linked together by an unseen variable (the heatwave).
+    Daily ice cream sales. A week-long heatwave hits: Monday's prediction is off
+    by +200, and because weather persists, Tuesday's is too. The errors are
+    chained together by something the model cannot see.
 
-Impact & Fix:
-The model misses obvious trends and patterns over time, and standard errors
-become unreliable (usually understated), making you overconfident in your
-coefficients.
-Fix it by adding a time-delay feature (like "Yesterday's Sales") or using
-time-series specific forecasting models.
+Breaks: coefficients stay unbiased, but standard errors are wrong — usually too
+small, so you end up overconfident.
+Test: Durbin-Watson (≈2 means no autocorrelation), ACF/PACF plots, or simply
+residuals plotted against time or row order.
+Fix: add lag features (yesterday's sales), use time-series models, or use
+autocorrelation-robust (Newey-West) standard errors.
 
 
-4. HOMOSCEDASTICITY (Constant Variance of Errors)
-----------------------------------------------------------------------
-What it means:
-The size of your model's mistakes should be roughly the same across all
-predictions. The errors shouldn't fan out or shrink as the predicted numbers get
-larger.
+4. HOMOSCEDASTICITY (CONSTANT ERROR VARIANCE)
+--------------------------------------------------------------------------------
+The spread of errors should be roughly the same across all predictions, not
+fanning out as predictions grow.
 
-Real-Life Example:
-Imagine predicting "Weekly Food Budget" based on "Income".
-* For low-income college students, the budget is tight. The model predicts $50,
-  and the actual is usually $45 to $55. The errors are very small.
-* For multi-millionaires, the model predicts $500. But one millionaire might eat
-  cheap fast food ($50), while another eats truffles and caviar ($5,000).
-* The variance (spread) of the errors gets massively wider as income increases.
-  This is heteroscedasticity.
+    Weekly food budget from income. For students the model predicts $50 and the
+    actual lands between $45 and $55. For millionaires it predicts $500, and the
+    actual is anywhere from $50 (fast food) to $5,000 (caviar). The error spread
+    explodes with income.
 
-Impact & Fix:
-The model is very confident and accurate for low values, but highly unreliable
-for high values. Coefficients remain unbiased, but their standard errors are
-wrong, so hypothesis tests and confidence intervals become invalid.
-Fix it by predicting the logarithm of the food budget instead of the raw dollar
-amount, which compresses those massive variations, or use Weighted Least Squares
-/ robust (Huber-White) standard errors.
+Breaks: coefficients stay unbiased, standard errors are wrong, so tests and
+confidence intervals are invalid. The model is also far less reliable at the high
+end than its overall metrics suggest.
+Test: residuals vs fitted — a funnel shape. Scale-location plot. Breusch-Pagan or
+White test.
+Fix: model log(y) instead of y, use Weighted Least Squares, or keep OLS and
+report robust (Huber-White) standard errors.
 
 
-5. NO PERFECT MULTICOLLINEARITY (Predictors Must Be Independent) — MLR only
-----------------------------------------------------------------------
-Note: this assumption is meaningless for SLR, since there is only one predictor.
-It only applies once you have 2+ predictors, i.e. in MLR.
+5. NO PERFECT MULTICOLLINEARITY (MLR AND PLR ONLY)
+--------------------------------------------------------------------------------
+Meaningless in SLR — it is a relationship BETWEEN predictors, and SLR has one.
 
-There are two distinct severities, and interviewers often test whether you know
-the difference:
+Two severities, and the difference gets tested:
 
-(a) PERFECT multicollinearity — a hard requirement, not just "nice to have"
-What it means:
-One predictor is an exact linear combination of others (e.g., you include both
-"temperature in Celsius" and "temperature in Fahrenheit"). The design matrix X is
-no longer full rank.
-Impact & Fix:
-OLS literally cannot compute a unique solution — (X^T X) is not invertible. This
-isn't a matter of degree; the model fails to fit at all. Fix by dropping the
-redundant column.
+  PERFECT — one predictor is an exact linear combination of others (temperature
+  in both Celsius and Fahrenheit; all k one-hot levels plus an intercept). XᵀX is
+  singular and OLS has no unique solution. The model does not fit at all. Fix:
+  drop the redundant column.
 
-(b) HIGH (imperfect) multicollinearity — a lesser, matter-of-degree issue
-What it means:
-Your input variables (features) are strongly, but not perfectly, correlated with
-each other.
+  HIGH but imperfect — predictors strongly correlated (house area and bedroom
+  count). OLS runs and stays unbiased, but coefficients become unstable and hard
+  to interpret individually. Predictions are essentially unaffected.
 
-Real-Life Example:
-Imagine predicting "House Price" using two variables: "Square Footage" and
-"Number of Bedrooms".
-* These two are heavily linked. A 4,000 sq ft house almost certainly has more
-  bedrooms than a 900 sq ft apartment.
-* If the model sees the price jump by $100,000, it gets confused. Was it because
-  the house is bigger? Or because it has an extra bedroom?
-* The model can't assign credit properly.
-
-Impact & Fix:
-OLS still runs and remains unbiased, but the coefficients become highly unstable
-(large variance) and hard to interpret individually. Adding or removing just one
-house from your dataset might wildly flip the importance of "Bedrooms" vs
-"Square Footage". Note: this does NOT hurt pure predictive accuracy, only
-inference (see Q2 below).
-Fix it by dropping one of the overlapping variables, or mathematically combining
-them into a single feature (like "House Size Index").
+Test: correlation matrix, VIF (above 5, strictly above 10, is a flag).
+Fix: drop or merge features, ridge, or PCA.
+Symptoms and worked examples: MLR/concept.txt section 6. Math: derivation Part 5.
 
 
-6. NORMALITY OF RESIDUALS (needed for inference, not for BLUE)
-----------------------------------------------------------------------
-What it means:
-If you take all the mistakes your model made and put them in a chart, they
-should form a normal bell curve. Most mistakes should be tiny, and huge mistakes
-should be very rare and equally balanced between over-predicting and
-under-predicting.
+6. NORMALITY OF RESIDUALS (INFERENCE ONLY)
+--------------------------------------------------------------------------------
+The residuals should be roughly bell-shaped, with large errors rare and balanced
+in both directions. Note this is about the RESIDUALS — never about the
+distribution of X or y.
 
-Real-Life Example:
-Imagine predicting "Pizza Delivery Time".
-* Most of the time, the model is off by just 1 or 2 minutes (peak of the bell curve).
-* However, drivers rarely arrive 30 minutes early (impossible due to cooking time).
-* But drivers DO sometimes arrive 45 minutes late (due to flat tires or traffic).
-* The errors are completely lopsided (skewed). You have massive positive errors
-  but no massive negative errors.
+    Pizza delivery time. Usually off by a minute or two. Drivers never arrive 30
+    minutes early — cooking takes time — but they do arrive 45 minutes late with
+    a flat tyre. The errors are strongly right-skewed.
 
-Impact & Fix:
-The baseline predictions and coefficients are still unbiased (this is NOT a
-Gauss-Markov condition), but any confidence intervals you generate ("We are 95%
-sure your pizza will arrive in 20-30 mins") will be unreliable in small samples.
-In large samples, the Central Limit Theorem bails you out.
-Fix it by removing extreme outliers or applying a mathematical transformation to
-the target variable.
+Breaks: nothing about the coefficients — they stay unbiased and BLUE. Only
+small-sample confidence intervals and p-values become unreliable. At large n the
+CLT makes them approximately valid anyway.
+Test: Q-Q plot of residuals, Shapiro-Wilk.
+Fix: transform the target, or investigate the outliers producing the skew.
+
+
+7. THE DIAGNOSTIC PLOTS
+--------------------------------------------------------------------------------
+Four plots cover almost everything above. Read them in this order:
+
+  Residuals vs fitted — the workhorse. Should be a shapeless band around zero.
+      A curve       -> linearity broken (1)
+      A funnel      -> heteroscedasticity (4)
+      Isolated dots -> outliers (section 8)
+
+  Scale-location (√|standardized residual| vs fitted) — the same funnel check
+  with the sign removed, so a flat line means constant variance. Easier to read
+  than the funnel when the data is dense.
+
+  Q-Q plot — residual quantiles vs normal quantiles. On the line means normal;
+  the ends curling away means fat tails or skew. Only matters for inference (6).
+
+  Residuals vs leverage — surfaces influential points (section 8).
+
+For MLR, add residuals vs EACH feature: the fitted-value plot says something is
+wrong, and this says which feature is wrong.
+
+
+8. OUTLIERS, LEVERAGE AND INFLUENCE
+--------------------------------------------------------------------------------
+Three different things that get used interchangeably and should not be:
+
+  OUTLIER    — unusual in y. Large residual; the model predicts it badly.
+  LEVERAGE   — unusual in x. Far from the centre of the feature cloud. Measured
+               by hᵢᵢ from the hat matrix (derivation Part 4). High leverage
+               means the point has the POTENTIAL to move the fit.
+  INFLUENCE  — actually moves the fit. Roughly outlier × leverage.
+
+    In a house price dataset: a normal-sized house that sold for triple its
+    market value is an OUTLIER. A 20,000 sqft mansion priced exactly as the trend
+    predicts is high LEVERAGE but harmless. A 20,000 sqft mansion sold at a
+    family discount is INFLUENTIAL — it is far out on x and off the line, so it
+    single-handedly tilts the whole fit.
+
+High leverage alone is not a problem. High leverage plus a large residual is.
+
+Measure: Cook's distance combines both. A common rule of thumb flags D > 4/n.
+Drop a flagged point, refit, and see how much the coefficients move — if the
+answer changes materially, one row is driving your conclusion.
+
+In MLR a point can be unremarkable on every individual feature and still be
+extreme in combination (5 bedrooms in 600 sqft), which no single-feature check
+catches. This is why leverage exists as a separate measure.
+
+Do not delete points automatically. Investigate first: a data entry error should
+be fixed or dropped; a genuine rare case may be the most informative row you
+have, and dropping it is quietly reshaping your conclusion.
 
 
 SUMMARY TABLE
-----------------------------------------------------------------------
-Assumption                          | Required for BLUE?    | If violated, what breaks       | How to test it
--------------------------------------|------------------------|---------------------------------|--------------------------------------
-1. Linearity                         | Yes                    | Bias (wrong functional form)   | Residuals vs Fitted plot (look for curve); Ramsey RESET test
-2. Zero Conditional Mean/Exogeneity  | Yes                    | Bias (worst violation)         | Not directly testable; domain reasoning about omitted confounders
-3. Independence of Errors            | Yes                    | Inefficiency, wrong std errors | Durbin-Watson test (~2 = no autocorrelation); ACF/PACF plots
-4. Homoscedasticity                  | Yes                    | Inefficiency, wrong std errors | Residuals vs Fitted plot (funnel shape); Breusch-Pagan / White test
-5. No Perfect Multicollinearity      | Yes (hard requirement) | Model can't even fit           | Correlation matrix; Variance Inflation Factor (VIF > 5-10 = flag)
-6. Normality of Residuals            | No                     | Unreliable inference (small n only) | Q-Q plot of residuals; Shapiro-Wilk test
+--------------------------------------------------------------------------------
+Assumption            BLUE?  If violated              How to test
+--------------------  -----  -----------------------  ---------------------------
+1 Linearity           Yes    BIAS                     Residuals vs fitted; RESET
+2 Exogeneity          Yes    BIAS (worst)             Not testable; domain sense
+3 Independence        Yes    Wrong standard errors    Durbin-Watson; ACF
+4 Homoscedasticity    Yes    Wrong standard errors    Funnel; Breusch-Pagan
+5 No perfect multicol Yes    Model cannot fit at all  Correlation matrix; VIF
+6 Normality           No     Bad small-sample tests   Q-Q plot; Shapiro-Wilk
 
-______________________________________________________________________
-Top Interview Questions on Linear Regression Assumptions
-
-Q1: Do the independent variables (features) need to be normally distributed in
-linear regression?
-Answer:
-No, this is a very common trap in interviews. Linear regression makes no
-assumptions about the distribution of the independent variables ($X$) or the
-dependent variable ($y$) itself. The normality assumption applies strictly to the
-*residuals* (the errors or the differences between the actual and predicted values).
-
-Q2: Does multicollinearity reduce the predictive accuracy of your model?
-Answer:
-No. If your primary goal is purely prediction (forecasting a value on unseen
-data), multicollinearity does not hurt the model's predictive power—as long as
-the correlation between the variables remains the same in the new data.
-Multicollinearity ruins *inference*. It makes the coefficients unstable and the
-p-values unreliable, meaning you cannot accurately determine *how much* a
-specific feature impacts the target.
-
-Q3: How do you detect and fix multicollinearity?
-Answer:
-Detection: I would use a correlation matrix for a quick check (looking for
-absolute values $> 0.8$) and calculate the Variance Inflation Factor (VIF) for
-each feature. A VIF above 5 (or strictly above 10) indicates problematic
-collinearity.
-Fix: I can drop one of the correlated variables, combine them mathematically
-(e.g., taking an average), apply dimensionality reduction like PCA, or use
-regularization techniques like Ridge or Lasso regression which handle
-collinearity natively.
-
-Q4: What is Heteroscedasticity, and why is it a problem?
-Answer:
-Heteroscedasticity occurs when the variance of the residuals changes across
-different levels of the predicted values (e.g., errors get larger as the
-predicted value gets larger). It is a problem because it violates the assumption
-of constant variance (homoscedasticity). As a result, the standard errors of the
-coefficients become biased. This makes confidence intervals and hypothesis tests
-(p-values) completely unreliable, leading you to potentially declare a variable
-statistically significant when it isn't.
-
-Q5: How can you correct for Heteroscedasticity?
-Answer:
-The most common first step is to apply a non-linear transformation to the target
-variable, such as taking the log or square root. This often compresses the
-spread of the data and stabilizes the variance. If that doesn't work or isn't
-appropriate, I would use Weighted Least Squares (WLS) or calculate Robust
-Standard Errors (like Huber-White standard errors) to adjust the inference
-metrics.
-
-Q6: What is the "Dummy Variable Trap" and how does it relate to these
-assumptions?
-Answer:
-The dummy variable trap is a scenario that causes *perfect multicollinearity*.
-It happens when you convert a categorical variable into one-hot encoded binary
-columns and include all of them in the model. For example, if you have a
-"Gender" feature with "Male" and "Female", keeping both columns means that if
-Male is 0, Female is perfectly predictable as 1. To avoid this, you must always
-drop one category to serve as the baseline reference.
-
-Q7: If you plot your residuals against your predicted values and see a distinct
-"U-shape" or curve, what does this mean?
-Answer:
-This indicates a violation of the **Linearity** assumption. A systematic curve
-in the residuals means the model is failing to capture a non-linear relationship
-in the data. To fix it, I would need to add polynomial terms (like $X^2$) to the
-model, or apply transformations to the input features.
-
-Q8: Your residuals are not normally distributed. Is your model entirely useless?
-Answer:
-Not entirely. By the Gauss-Markov theorem, linear regression estimates remain
-unbiased and optimal (BLUE - Best Linear Unbiased Estimators) even if errors are
-not normal, provided the other assumptions hold. However, you can no longer
-trust the statistical tests. Your t-tests, F-tests, confidence intervals, and
-p-values will be invalid, meaning you cannot confidently state whether your
-coefficients are statistically significant.
-
-Q9: When is the Independence of Errors assumption most likely to be violated?
-Answer:
-It is almost always violated in time-series data or spatial data. If you are
-predicting daily stock prices, an external shock on Monday will affect the
-errors on Monday, Tuesday, and Wednesday. This autocorrelation means the model
-is ignoring a time-based pattern. We detect it using the Durbin-Watson test.
-
-Q10: What does it mean for OLS to be "BLUE", and which assumptions are actually
-required for it?
-Answer:
-BLUE stands for Best Linear Unbiased Estimator: among all estimators that are
-linear functions of y and unbiased, OLS has the minimum variance. It requires
-Linearity, Zero Conditional Mean (exogeneity), Independence of errors, No
-Perfect Multicollinearity, and Homoscedasticity — the five Gauss-Markov
-assumptions. Normality is notably NOT required for BLUE; it's only needed for
-exact small-sample inference (t-tests, F-tests, confidence intervals).
-
-Q11: Between heteroscedasticity and endogeneity (violating zero conditional
-mean), which is the bigger problem, and why?
-Answer:
-Endogeneity is strictly worse. Heteroscedasticity keeps your coefficient
-estimates unbiased — it only corrupts the standard errors, so your point
-estimates are still centered on the truth, and there are known fixes (WLS,
-robust standard errors). Endogeneity means E[ε|X] != 0, which directly biases
-the coefficients themselves — the model is confidently wrong, not just
-imprecisely right, and no amount of additional data fixes it without addressing
-the omitted variable or confounding directly.
-
-Q12: What's the difference between "perfect" and "high" multicollinearity, and
-does either one apply to Simple Linear Regression (SLR)?
-Answer:
-Perfect multicollinearity means one predictor is an exact linear combination of
-another (e.g., duplicate/redundant columns) — X^T X becomes singular and OLS
-can't be solved at all. High (imperfect) multicollinearity means predictors are
-strongly but not perfectly correlated — OLS still runs, but coefficients become
-unstable and hard to interpret, though prediction accuracy is largely unaffected.
-Neither applies to SLR, since multicollinearity is a relationship *between*
-predictors, and SLR has only one.
-
-Q13: Do these assumptions still matter if you're using Ridge/Lasso, or a
-tree-based/non-parametric model instead of plain OLS?
-Answer:
-For Ridge and Lasso, linearity and the general model form are still assumed
-(they're still linear-in-parameters models), but the estimator is no longer
-BLUE by design: regularization deliberately introduces bias to reduce
-variance, trading Gauss-Markov's "unbiased" property for lower test error.
-Homoscedasticity and normality matter less because you typically care about
-predictive performance, not p-values or confidence intervals on coefficients.
-Multicollinearity is actually handled natively — Ridge shrinks correlated
-coefficients together instead of letting them blow up.
-For tree-based/non-parametric models (Random Forest, GBMs), none of these
-assumptions apply: no linearity requirement, no homoscedasticity/normality
-requirement on residuals, and they're naturally robust to multicollinearity
-for prediction (though correlated features still distort feature-importance
-interpretation, similar to unstable coefficients in OLS).
+Not assumptions, though often stated as such:
+  - X or y must be normally distributed. False — only residuals.
+  - Residuals must have mean zero. True by construction with an intercept, not a
+    testable assumption (derivation Part 2).
+  - Features must be uncorrelated with each other. Only PERFECT correlation is
+    disallowed; high correlation is a quality problem, not a violation.

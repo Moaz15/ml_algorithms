@@ -10,14 +10,14 @@ LINEAR REGRESSION — REVISION ROADMAP
 [x] The three variants: SLR -> MLR -> PLR
 [x] Bias trick (column of ones)
 
-2. THE OBJECTIVE                                 -> derivation, Part 2
+2. THE OBJECTIVE                                 -> derivation, Part 1
 --------------------------------------------------------------------------------
 [x] SSE / MSE; effect of the 1/n and 1/2 factors
 [x] Why squared error: differentiability / MLE under Gaussian / conditional mean
 [x] Squared vs absolute loss -> mean vs median
 [x] Outlier sensitivity; Huber, quantile, RANSAC
 
-3. SOLVING IT                                    -> derivation, Parts 3-5, 7, 10
+3. SOLVING IT                                    -> derivation, Parts 2-4, 6, 9
 --------------------------------------------------------------------------------
 [x] SLR closed form: m = S_xy/S_xx, c = ȳ - m·x̄
 [x] Slope as Cov/Var, as r·(s_y/s_x), as weighted average of y
@@ -35,6 +35,7 @@ LINEAR REGRESSION — REVISION ROADMAP
 4. ASSUMPTIONS                                   -> assumptions.txt
 --------------------------------------------------------------------------------
 [x] Linearity
+[x] Zero conditional mean / exogeneity — the bias-causing one
 [x] Independence of errors / autocorrelation
 [x] Homoscedasticity
 [x] Normality of errors (inference only)
@@ -44,7 +45,7 @@ LINEAR REGRESSION — REVISION ROADMAP
 [x] Outlier vs leverage vs influence; Cook's distance
 [x] Fixes: transforms, WLS, robust SEs
 
-5. MULTICOLLINEARITY                             -> derivation, Part 6
+5. MULTICOLLINEARITY                             -> derivation, Part 5
 --------------------------------------------------------------------------------
 [x] When XᵀX is singular: d > n, duplicate columns, dummy trap
 [x] Var(β̂ⱼ) formula; VIF = 1/(1 - R²ⱼ)
@@ -58,9 +59,13 @@ LINEAR REGRESSION — REVISION ROADMAP
 [x] Training R² never decreases when adding features
 [x] Adjusted R²
 [x] RMSE vs MAE vs MAPE
-[x] Train/test split, cross-validation
+[x] MSE to train, RMSE/MAE to report — and why
+[x] RMSLE, Median AE, Huber — when each one
+[x] Train/test split, k-fold cross-validation
+[x] CV pitfalls: preprocessing leakage, time-series and grouped splits
+[x] Choosing a metric from what the error costs
 
-7. REGULARIZATION                                -> derivation, Part 8
+7. REGULARIZATION                                -> derivation, Part 7
 --------------------------------------------------------------------------------
 [x] Ridge: (XᵀX + λI)⁻¹Xᵀy; always invertible
 [x] Lasso: no closed form; sparsity from the L1 corners
@@ -79,7 +84,7 @@ LINEAR REGRESSION — REVISION ROADMAP
 [x] Choosing degree by cross-validation
 [x] Ridge on polynomial features; splines / GAMs as the alternative
 
-9. STATISTICAL PROPERTIES                        -> derivation, Part 9
+9. STATISTICAL PROPERTIES                        -> derivation, Part 8
 --------------------------------------------------------------------------------
 [x] Unbiasedness and what it requires
 [x] Cov(β̂) = σ²(XᵀX)⁻¹
@@ -125,5 +130,6 @@ DRILL QUESTIONS
 GAPS TO CLOSE
 --------------------------------------------------------------------------------
 1. [ ] code/PLR/ — basis expansion, degree sweep, train vs test curve
-2. [ ] interview_qa.txt
+2. [ ] interview_qa.txt — assumptions section done; add derivation,
+       MLR/PLR and evaluation sections
 3. [ ] Ridge in the MLR implementation
