@@ -1,126 +1,169 @@
 SIMPLE LINEAR REGRESSION — CONCEPT & INTUITION
 ==============================================
+Derivation: ../mathematical_derivation.txt (PART 2).
+Running example: predicting delivery TIME (minutes) from DISTANCE (km).
 
-1. THE PICTURE
+
+1. WHAT WE ARE ACTUALLY ASKING FOR
 --------------------------------------------------------------------------------
-One feature x, one continuous target y, n points on a scatter plot. Draw the line
-that sits best among them:
+Two orders 5 km away take 26 and 34 minutes. Neither is wrong — traffic, rider
+and kitchen queue differ. So "the time for a 5 km order" does not exist as one
+number. What does exist is the AVERAGE over all 5 km orders:
 
-    ŷ = m·x + c
+    ŷ = E[y | x],  the conditional mean
 
-"Best" means smallest total squared VERTICAL gap to the points. Everything else
-is bookkeeping on that one sentence.
+Two consequences that prevent most misreadings:
+  - The line is not trying to hit points. It sits at the centre of the cloud at
+    every x.
+  - A correct model can still miss individual orders badly, because the spread
+    was never its to explain. Hence a low R² is not automatically a bad model.
 
-The line estimates the conditional mean: for a given x it predicts the AVERAGE y
-at that x, not any individual point. That is why a low R² can still mean a
-correct model applied to a noisy process.
 
-
-2. WHY VERTICAL DISTANCES, NOT PERPENDICULAR
+2. WHY A STRAIGHT LINE
 --------------------------------------------------------------------------------
-The instinct is to minimize the perpendicular distance to the line. OLS does not.
-The model is asymmetric: x is treated as known and fixed, and all the error is
-assumed to sit in y. We predict y from x, so only the error in y counts.
+We need a rule turning any distance into a time. The simplest one that still
+responds to x is a constant rate:
 
-Two consequences:
-  - Measurement error in x is not handled, and biases the slope toward zero
-    (attenuation bias).
-  - Minimizing perpendicular distance is a different method — Total Least Squares
-    — which is what you want when BOTH variables are noisy measurements.
+    ŷ = m·x + c        c = cost before you move at all (pickup, packing)
+                       m = what each extra km adds (minutes per km)
+
+Two knobs, both physically meaningful. It is the simplest thing that is not a
+flat line: ŷ = c ignores distance, while a curve needs more knobs and more data
+to pin them down.
+
+This is a CHOICE, not a discovery. If the truth bends, a line cannot express it
+no matter how much data you collect (section 6).
 
 
-3. READING THE COEFFICIENTS
+3. WHY VERTICAL DISTANCE, NOT PERPENDICULAR
 --------------------------------------------------------------------------------
-Slope m: expected change in y per one-unit increase in x, carrying units. "The
-slope is 0.8" is meaningless; "0.8 kg per extra cm of height" is a finding.
+"Closest to the points" is ambiguous until you ask: closest in which direction?
+The natural guess is perpendicular. OLS uses vertical instead.
 
-Intercept c: predicted y at x = 0, and often not interpretable — saying so is a
-mark of maturity. x = 0 may be impossible (zero height) or far outside the data,
-making the intercept an extrapolation. Centring x makes the intercept the
-predicted y at the AVERAGE x, which usually is interpretable.
+The model is asymmetric — distance is given and treated as fixed, all the
+uncertainty is in time. So the mistake that matters is "how far off was the
+predicted TIME", a vertical gap. A perpendicular gap would mix in an error in
+distance we already assumed away.
 
-The line always passes through the centroid (x̄, ȳ). Useful anchor: the fit pivots
-around the middle of the data, so points far out on the x-axis have the most
-power to tilt it.
+  - If x really IS noisy (a GPS distance that is itself an estimate), OLS does
+    not account for it and the slope is biased toward zero — attenuation bias.
+  - Minimizing perpendicular distance is a different, valid method (Total Least
+    Squares), correct when both variables are noisy measurements.
 
 
-4. SLOPE VS CORRELATION
+4. READING THE TWO NUMBERS
+--------------------------------------------------------------------------------
+    predicted_time = 12 + 3.5 × distance_km
+
+SLOPE — quote it with units. "3.5" means nothing; "3.5 minutes per km" is a
+finding. It is a rate comparing orders, not a promise about one: 6 km orders
+average 3.5 minutes longer than 5 km orders.
+
+INTERCEPT — the prediction at x = 0. Here it is real: a 0 km order still needs
+12 minutes of cooking and pickup. That is luck. Predict weight from height and
+the intercept is the weight of a 0 cm person — x = 0 is outside anything the
+data saw, so it is an extrapolation with no evidence behind it. Centre x
+(subtract the mean) and the intercept becomes the predicted time at the AVERAGE
+distance, which is interpretable again.
+
+From the derivation: the line always passes through the centroid (x̄, ȳ). The fit
+PIVOTS there, so a point far out on the x-axis has a long lever arm and far more
+power to tilt it. That is leverage (../assumptions.txt section 8).
+
+
+5. SLOPE VS CORRELATION
 --------------------------------------------------------------------------------
     slope = correlation × (spread of y / spread of x)
 
-  - Correlation is unitless and bounded in [-1, 1]. The slope is neither.
-  - They share a sign but say different things. A tiny slope can sit with a
-    correlation of 0.99 (tight but shallow); a steep slope with 0.2 (steep but
-    scattered).
-  - Correlation is symmetric; the slope is not. Regressing y on x and x on y give
-    two different lines, coinciding only when correlation is exactly ±1.
+    slope (m)        "1 km more, how many minutes?" Has units, unbounded.
+    correlation (r)  "how tightly do points hug the line?" Unitless, in [-1, 1].
 
-Regression toward the mean falls out of this. Standardize both variables and the
-slope IS the correlation, always ≤ 1 in magnitude — so a point one SD above
-average in x is predicted less than one SD above average in y. Tall parents have
-tall children, but on average less extreme than themselves. No biological force
-needed, just imperfect correlation.
+Different questions, so they disagree freely:
+  - Tight but shallow — time rises 0.5 min/km, every point almost on the line.
+    Small slope, r ≈ 0.98.
+  - Steep but scattered — time rises 8 min/km with huge spread. Large slope,
+    r ≈ 0.2.
 
-    This is the source of endless bad analysis: "we coached the worst-performing
-    stores and they all improved" — the worst performers would have drifted back
-    toward average anyway.
+A steeper line does not mean a stronger relationship. Correlation is also
+symmetric (corr(x,y) = corr(y,x)) while regression is not: time-from-distance
+and distance-from-time are two different lines.
 
-At d = 1 only, R² is literally the square of the correlation between x and y.
+REGRESSION TOWARD THE MEAN drops out of the same formula. Standardize both and
+the slope IS r, at most 1 — so a point one SD above average in x is predicted
+LESS than one SD above average in y.
+
+    A chain coaches its 20 worst-performing stores; next quarter they improve.
+    The coaching may have done nothing. Extreme results are part skill, part
+    luck, and luck does not repeat — any extreme group drifts back toward the
+    average on its own.
+
+That blind spot is how training programmes and "hot streaks" get credited with
+effects they never had. At d = 1 only, R² is literally r².
 
 
-5. THE SCATTER PLOT IS THE DIAGNOSTIC
+6. THE SCATTER PLOT IS THE DIAGNOSTIC
 --------------------------------------------------------------------------------
-SLR is the one case where you can LOOK at the data and see everything: curvature,
-outliers, changing spread, clusters, and whether a line was ever sensible. Use it
-while you can — from MLR onward you are reduced to residual plots.
+SLR is the one case where all the data fits in one picture, so curvature,
+outliers, changing spread and clusters are directly visible. Use it while it
+lasts — from MLR on you are down to residual plots.
 
-Two plots answer most questions:
-  - y vs x with the fitted line — is a line the right shape at all?
-  - residuals vs fitted — any pattern means something is missing. A curve means
-    non-linearity; a funnel means non-constant variance.
+    y vs x with the fitted line   was a line ever the right shape?
+    residuals vs fitted           any pattern means something is missing.
+                                  A curve  -> the relationship bends.
+                                  A funnel -> spread grows with x.
 
-images/ in this folder holds worked examples, e.g. linearity_test.png.
+    Our example bends: the first km through city traffic costs more minutes than
+    the tenth on a highway. A line splits the difference, over-predicting short
+    orders and under-predicting long ones — a U-shape in the residuals, and
+    invisible in R² alone.
 
-
-6. ANSCOMBE'S QUARTET
---------------------------------------------------------------------------------
-Four datasets sharing nearly every summary statistic — same means, variances,
-correlation, fitted line and R² — that look completely different when plotted:
+WHY YOU CANNOT SKIP THE PLOT — Anscombe's quartet: four datasets with nearly
+identical means, variances, correlation, fitted line and R², that look nothing
+alike plotted.
 
     1. A genuine linear relationship.
-    2. A clean curve; a line is the wrong shape.
+    2. A clean curve — a line is the wrong model.
     3. A perfect line with one outlier dragging the fit off it.
-    4. All points at one x value except one, which alone sets the slope.
+    4. All points at one x except a single far-out point, which alone sets the
+       slope.
 
-Identical metrics do not mean identical models. Never accept an R² without
-looking at the plot.
+Same numbers, four different stories. Never accept an R² without the picture.
+(images/ here holds worked examples, e.g. linearity_test.png.)
 
 
 7. CORRELATION IS NOT CAUSATION
 --------------------------------------------------------------------------------
-A slope says "these move together", never "x causes y". Three alternatives:
-reverse causation (y drives x), confounding (a third variable drives both — ice
-cream sales and drownings, both driven by temperature), and coincidence.
+A slope says only "these move together". Three rivals survive:
 
-With one predictor you cannot rule any of these out, because you cannot control
-for what is not in the model. That limitation is exactly what motivates MLR.
+    Reverse causation  y drives x.
+    Confounding        a third factor drives both — ice cream sales predict
+                       drownings; temperature causes both.
+    Coincidence        chance, especially after testing many variables.
+
+Ruling them out means HOLDING THEM CONSTANT, and you cannot hold constant what
+is not in the model. With one predictor you never can — which is exactly why MLR
+exists (../MLR/concept.txt section 3). Even MLR only controls for what you
+thought to include.
 
 
-8. WHEN SLR IS THE RIGHT TOOL
+8. WHEN TO USE IT
 --------------------------------------------------------------------------------
-Use it when one dominant driver explains most of the variation, when you need an
-explainable relationship more than the last percent of accuracy, or as a baseline
-and exploration tool.
+Use SLR when one dominant driver explains most of the variation, when
+explainability beats the last percent of accuracy, or as a baseline.
 
-Do not use it when the plot is visibly curved (transform x, or go polynomial),
-when the spread of y grows with x (transform y), when a few extreme points steer
-the line, when you must predict outside the observed range of x, or when the
-outcome is a category (that is logistic regression).
+Do not use it when:
+    the plot is visibly curved         -> transform x, or go polynomial
+    spread of y grows with x           -> transform y, or weighted least squares
+    a few extreme points steer the fit -> investigate them first
+    you must predict outside the observed x range
+    the outcome is a category          -> logistic regression
 
 
 9. THE BRIDGE TO MLR
 --------------------------------------------------------------------------------
-Everything above survives; only the geometry changes. Two things change in kind:
-coefficients become PARTIAL effects ("the effect of x₁ holding x₂ fixed"), and
-features can now be correlated with each other, which is the whole topic of
-multicollinearity and has no SLR analogue.
+Everything survives; the line becomes a hyperplane. Two things change in kind:
+
+  - Coefficients become PARTIAL effects — "distance holding traffic fixed" — a
+    different quantity from the SLR slope, not a bigger version of it.
+  - Features can be correlated with EACH OTHER, which has no SLR analogue and is
+    the whole topic of multicollinearity.

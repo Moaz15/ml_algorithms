@@ -1,0 +1,357 @@
+DATA LEAKAGE: TAXONOMY, DETECTION, PREVENTION, AND INTERVIEW Q&A
+================================================================================
+
+--------------------------------------------------------------------------------
+1. THE DEFINITION THAT COVERS EVERY CASE
+--------------------------------------------------------------------------------
+
+Leakage is the use, at training time, of information that will not be available
+(in that form, at that moment) when the model has to make a real prediction.
+
+The consequence is always the same shape: offline metrics are optimistic, and
+the gap only appears in production, where it is expensive. Leakage is the single
+most common reason a model that looked excellent in a notebook is worthless
+after deployment -- more common than overfitting, and much harder to see,
+because every diagnostic you own agrees the model is great.
+
+The test to apply to any feature:
+
+    "At the exact moment I must predict, do I have this value, computed only
+     from data that already existed then?"
+
+If the answer is no, or "only after the outcome is known", it is a leak. Two
+axes, and it helps to keep them separate:
+
+    Target leakage        a feature encodes the answer, or is a consequence of
+                          it. Breaks the model even with a perfect split.
+    Train-test contamination
+                          information crosses the split boundary. The model is
+                          fine in principle; the ESTIMATE is corrupted.
+
+--------------------------------------------------------------------------------
+2. TARGET LEAKAGE
+--------------------------------------------------------------------------------
+
+2.1 The feature is caused by the target
+    Predicting hospital readmission with a "discharge_medication_adjusted" flag
+    that is only set after the readmission decision. Predicting churn with
+    "account_closed_date". Predicting fraud with "chargeback_amount", which
+    exists because the fraud was already confirmed. Predicting a loan default
+    with "collections_contact_count".
+    These give near-perfect offline scores and are null or zero at prediction
+    time, so the model collapses to guessing.
+
+2.2 The feature is a proxy for the label's own definition
+    Predicting "high spender" from total spend when the label is a threshold on
+    total spend. Predicting a 30-day churn label using a feature computed over a
+    60-day window that includes the label period. This one hides well because no
+    single column obviously contains the answer.
+
+2.3 Post-outcome timestamps and status fields
+    Any field whose value is written by a downstream process: case status,
+    resolution code, manual review outcome, "verified" flags, updated_at.
+    Anything an operations team touches after the fact is suspect.
+
+2.4 Leakage through IDs and metadata
+    Auto-incrementing IDs correlate with time, so an ID becomes a time proxy and
+    the model learns the trend rather than the mechanism. Worse when the data
+    was assembled per class: if positives were exported after negatives, ID
+    alone separates them perfectly. Same for file order, row order, and
+    directory structure in image datasets. If dropping an ID column changes your
+    AUC, you have learned something about your export process, not the world.
+
+2.5 Aggregates computed over the full period
+    "Customer's average order value" computed over all of history, then used to
+    predict an event in the middle of that history. The average contains the
+    future. This is the leak that survives every correct split, because the
+    corruption happened during feature engineering.
+
+--------------------------------------------------------------------------------
+3. TRAIN-TEST CONTAMINATION
+--------------------------------------------------------------------------------
+
+3.1 Preprocessing fitted before the split
+    StandardScaler, imputers, PCA, feature selection, discretisation bins,
+    outlier thresholds -- fit on all rows, the test set's statistics leak into
+    the transformation. Usually a small optimistic bias, but it is free to fix
+    and there is no argument for not fixing it.
+    Rule and mechanism in cross_validation.txt section 5.
+
+3.2 Resampling before the split
+    SMOTE and other synthetic oversampling interpolate between real points. Run
+    before splitting, the validation fold receives points interpolated from
+    training rows, i.e. near-copies of training data. This is not a small bias:
+    it routinely moves AUC by 0.15-0.20 and it is the single most common
+    catastrophic pipeline error in imbalanced-data work.
+    Also: never resample the validation or test fold at all. It must keep
+    production's class balance or every threshold and precision number is wrong.
+
+3.3 Target / mean encoding without inner folds
+    Replacing a category with the mean target for that category uses the row's
+    own label in its own feature. For a rare category with three rows, the
+    encoded value essentially IS the label. Correct schemes:
+      - out-of-fold encoding: compute each row's encoding from the OTHER folds;
+      - leave-one-out with smoothing;
+      - and always shrink toward the global mean by count:
+            enc = (sum_target + m * global_mean) / (count + m)
+    The smoothing parameter m controls how much you trust a small category.
+
+3.4 Duplicate and near-duplicate rows
+    Joins that fan out, re-scraped records, augmented images, the same news
+    article syndicated to five outlets, retried API events. Random splitting
+    puts copies on both sides and the test score measures memorisation.
+    Deduplicate BEFORE splitting; for text and images use near-duplicate
+    detection (hashing, minhash, embedding similarity), not exact equality.
+
+3.5 Group leakage
+    Multiple rows share an entity that will not be shared at prediction time:
+    patient, user, device, session, store, document. Random splits let the model
+    identify the entity instead of learning the phenomenon. The medical-imaging
+    version is notorious -- several scans per patient, split by scan, and
+    published accuracy that evaporates on new patients.
+    Fix: grouped splits along the entity axis.
+
+3.6 Temporal leakage
+    Random splits on time-ordered data train on the future. Even without an
+    explicit trend, autocorrelation means neighbouring rows are near-duplicates.
+    Related: label windows that overlap the training period, which is why
+    time-series CV needs a gap of at least the label horizon.
+
+3.7 Selection and tuning leakage (the slow kind)
+    Feature selection on the full dataset, hyperparameters tuned against the
+    test set, thresholds chosen on the test set, "we tried 40 architectures and
+    kept the one with the best test score". No single step feels wrong, and the
+    test estimate quietly stops being an estimate. Nested CV or a write-once
+    test set is the structural answer (cross_validation.txt section 6).
+
+3.8 Serving-time skew, the mirror image
+    Not leakage exactly, but it presents identically. The offline feature is
+    computed from a batch table with full history; the online feature is
+    computed from a streaming cache with a five-minute delay. Training saw a
+    cleaner feature than serving will ever see. This is what feature stores with
+    point-in-time correctness exist to prevent.
+
+--------------------------------------------------------------------------------
+4. SYMPTOMS: WHEN TO SUSPECT A LEAK
+--------------------------------------------------------------------------------
+
+    - The metric is implausibly good. Domain knowledge beats optimism: if
+      nobody in the field predicts this at 0.97 AUC, you have not just done it
+      on a Tuesday afternoon.
+    - One feature dominates importance and it is not the one a domain expert
+      would name first.
+    - Removing that single feature collapses performance to near-baseline.
+    - Perfect or near-perfect separation; logistic regression coefficients
+      diverging (see maximum_likelihood_estimation.txt section 6.1).
+    - Training and validation error are both tiny and equal -- leakage looks
+      like an easy problem, not like overfitting.
+    - The offline-to-online gap is large and reproducible.
+    - Performance decays as the test window moves further from the training
+      window in a way no drift story explains.
+    - A feature has suspiciously few nulls, or its null pattern correlates with
+      the label.
+
+Note the diagnostic asymmetry that makes leakage dangerous: overfitting shows a
+train/validation GAP, so cross-validation catches it. Leakage inflates both
+sides equally, so cross-validation confirms it. You cannot find it with the
+metric; you find it by reasoning about time and provenance.
+
+--------------------------------------------------------------------------------
+5. DETECTION PLAYBOOK
+--------------------------------------------------------------------------------
+
+    1. Feature-by-feature timestamp audit. For every feature, when is the value
+       written, and by which process? Anything written after the prediction
+       moment is out. Doing this once per project finds most leaks.
+    2. Single-feature models. Fit a model on each feature alone. Any feature
+       reaching near the full model's score is a suspect.
+    3. Ablation. Drop the top-importance feature and refit. A collapse to
+       baseline is a leak signature; a modest drop is a genuinely useful feature.
+    4. Temporal backtest. Train strictly on the past, test on the most recent
+       held-out period. Leaked features usually stop working here.
+    5. Adversarial validation. Label train rows 0 and test rows 1 and try to
+       classify. High AUC means the two sets are distinguishable -- either
+       distribution shift or an artefact like an ID or a timestamp proxy. The
+       feature importances of THAT model point straight at the offender.
+    6. Duplicate scan. Exact and near-duplicate detection across the split.
+    7. Shuffle test. Permute the labels and refit. Anything meaningfully above
+       chance means information is reaching the model through the split
+       structure rather than through the features.
+    8. Ask the person who owns the table. Faster than all of the above.
+
+--------------------------------------------------------------------------------
+6. PREVENTION, IN ORDER OF LEVERAGE
+--------------------------------------------------------------------------------
+
+    1. Split first, and split along the deployment axis (time, then entity).
+       Every subsequent operation happens after the split.
+    2. Put every learned transformation in a pipeline, and cross-validate the
+       pipeline. Makes correctness structural instead of remembered.
+    3. Write down the prediction moment for the use case, explicitly, before
+       building features. Most leaks are a mismatch between an unstated
+       assumption about "now" and reality.
+    4. Point-in-time correct joins. Every feature is computed "as of" the
+       prediction timestamp, using only records with an event time before it.
+       This is the one discipline that eliminates the aggregate-over-full-period
+       class of leak, and it is what a feature store buys you.
+    5. Gap between training and evaluation windows, at least the label horizon.
+    6. Deduplicate on entity keys and near-duplicate content before splitting.
+    7. Freeze the test set. Touch it once. If you must iterate, iterate on
+       validation and accept nested CV's overhead for the final number.
+    8. Blocklist the obvious column families in code: IDs, created_at/
+       updated_at, status and resolution fields, anything named *_final,
+       *_actual, *_resolved.
+    9. Reuse the same feature code offline and online. Divergent
+       implementations are how skew appears even in a leak-free design.
+
+--------------------------------------------------------------------------------
+7. WORKED EXAMPLE: A 30-DAY CHURN MODEL DONE WRONG THEN RIGHT
+--------------------------------------------------------------------------------
+
+The task: on day T, predict whether a subscriber churns during [T, T+30].
+
+Wrong version:
+    - Features: lifetime average sessions per week, total support tickets,
+      last_login_date, plan_status.
+    - Split: random 80/20 over all subscribers.
+    - Encoding: target-encode "acquisition_channel" over the whole dataset.
+    - Result: 0.96 AUC. Ship it.
+
+What actually happened:
+    - "Lifetime average sessions" spans the label window, so churners have a
+      quiet tail baked into their average. Future information.
+    - "last_login_date" for a churner is, by construction, inside the label
+      window: a churner's last login is when they left. This is nearly the
+      label itself.
+    - "plan_status" is updated to "cancelled" by billing after the churn.
+      Post-outcome field.
+    - Random split ignores time, so the model trains on later cohorts and
+      predicts earlier ones.
+    - Target encoding used every row's own label.
+
+Right version:
+    - Fix a cutoff T per training example. Compute every feature only from
+      events with timestamp strictly before T (point-in-time correctness),
+      windowed: sessions in the 7, 14 and 28 days before T; tickets before T;
+      days since last login as of T.
+    - Exclude any field written by a downstream process, or snapshot its value
+      as of T from a history table rather than reading its current value.
+    - Split by time: train on cohorts with T before a cutoff, validate on later
+      cohorts, and leave a 30-day gap so no training label window overlaps the
+      validation period.
+    - Target-encode inside the training folds only, out-of-fold, smoothed by
+      category count.
+    - Realistic result: 0.72-0.78 AUC. This is the number that survives
+      deployment, and the earlier 0.96 was never real.
+
+The lesson to state in an interview: the fix is not a modelling technique, it is
+the discipline of defining the prediction moment and computing every feature as
+of that moment.
+
+--------------------------------------------------------------------------------
+8. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+Leakage is training on information that will not be available at prediction
+time, and it comes in two families: target leakage, where a feature encodes or
+results from the outcome, and train-test contamination, where information
+crosses the split -- preprocessing fitted before splitting, SMOTE before
+splitting, target encoding using a row's own label, duplicates or the same user
+on both sides, random splits on time-ordered data, and tuning against the test
+set. What makes it dangerous is that it inflates training and validation scores
+equally, so cross-validation confirms it rather than catching it; the only
+reliable detector is reasoning about provenance and timing, backed by ablations,
+a temporal backtest, and adversarial validation. Prevention is structural: split
+first and along the deployment axis, define the prediction moment explicitly,
+compute every feature point-in-time correct as of that moment, keep learned
+transformations inside pipelines and inside folds, and touch the test set once.
+
+--------------------------------------------------------------------------------
+9. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Define data leakage and why cross-validation does not protect you from it.
+A: Leakage is using information at training time that would not be available,
+in that form and at that moment, when the model has to predict for real.
+Cross-validation protects against variance in the error estimate and against
+overfitting, both of which show up as a gap between training and validation
+performance. Leakage raises both sides together, so every fold agrees the model
+is excellent -- CV faithfully reports an inflated number. Finding it requires
+reasoning about where each feature comes from and when it is written, not
+looking harder at the metric.
+
+Q: Give me three leaks that a scikit-learn Pipeline does NOT prevent.
+A: First, target leakage -- a pipeline will happily scale and feed a feature
+that is written after the outcome. Second, the wrong split axis: a pipeline
+cannot know that rows share a patient or that the data is time-ordered, so
+random folds still leak. Third, duplicates across the split, since the pipeline
+sees the partition as given. Pipelines solve exactly one family, the
+fit-before-split family, and they solve it completely -- which is why they are
+necessary and not sufficient.
+
+Q: A feature has 0.93 correlation with the target. Good news?
+A: Suspicious news. That level of single-feature correlation on a genuinely hard
+problem is more often a leak than a discovery. I would check when the field is
+written and by which system, fit a model on that feature alone to see how much
+of the total performance it accounts for, ablate it, and run a temporal backtest
+to see whether it keeps working when the training data strictly precedes the
+test data. If it is legitimately available before the prediction moment and
+survives the backtest, then it is a great feature and the problem is easier than
+we thought -- but the burden of proof sits with the feature.
+
+Q: How do you do target encoding without leaking?
+A: Compute the per-category target statistic out-of-fold: for each row, use only
+the labels in the other folds, so a row never contributes to its own encoding.
+Then shrink toward the global mean in proportion to the category count, so that
+a category with three observations barely moves from the prior -- unsmoothed
+encodings on rare categories are nearly the label itself. In a k-fold setup this
+means an inner encoding loop per training fold, and at serving time you apply
+the encoding table fitted on the full training data. Leave-one-out encoding with
+noise is an alternative but is more fragile.
+
+Q: You inherit a model with 0.99 offline AUC that performs at chance in
+production. What is your first hour?
+A: I would treat it as leakage until proven otherwise. Pull feature importance
+and check the top few features against the source tables for when each value is
+written -- anything populated by a downstream or manual process after the event
+is the likely culprit. In parallel, check how the split was done: random on
+time-ordered data, or row-level on grouped data, both produce this pattern. Then
+ablate the top feature and see whether performance collapses to baseline, which
+distinguishes a leak from a strong legitimate signal. Only if all of that is
+clean would I move to serving skew -- comparing the feature values the model
+receives online against the training distribution for the same entities.
+
+Q: Is it leakage to use the test set's feature distribution for scaling if you
+never touch the labels?
+A: Technically yes, and it matters more than people expect in two cases. It is
+transductive: the transformation you would apply in production cannot depend on
+future data, so a scaler fitted on the test rows is not the scaler you can
+deploy, and the reported error is not achievable. The bias is usually tiny for
+mean and variance on large samples, but it is not tiny for quantile binning,
+PCA, or anything fitted on a small test set, and it is not tiny at all if the
+test period is shifted. Since fitting inside the fold costs nothing, there is no
+scenario where the shortcut is worth defending.
+Follow-up: does the same argument apply to semi-supervised learning on unlabelled
+production data? No -- that is legitimate, because the unlabelled data genuinely
+exists before the prediction moment. The distinction is availability in time,
+not whether labels were used.
+
+Q: How does leakage differ from overfitting?
+A: Overfitting is the model memorising noise in the training data; it is visible
+as a train/validation gap, it is caused by too much capacity for the data, and
+regularisation, more data or a simpler model fix it. Leakage is the data itself
+carrying the answer or crossing the split boundary; it shows no gap, it is
+caused by pipeline and feature-engineering decisions, and no amount of
+regularisation touches it. A useful shorthand: overfitting is a modelling error
+you can see, leakage is a data error you have to reason your way to.
+
+Q: What is adversarial validation and when do you reach for it?
+A: You label training rows 0 and test rows 1, pool the features, and train a
+classifier to tell them apart. If it succeeds, the two sets are distinguishable,
+and the feature importances of that classifier name exactly which columns give
+it away -- typically an ID that correlates with time, a timestamp, or a feature
+whose distribution shifted. I use it when the offline-to-online gap is
+unexplained, when a competition-style test set behaves oddly, or as a routine
+check that a time-based split is not accidentally separable on an artefact. It
+diagnoses both leakage-by-artefact and genuine covariate shift, and the
+importances tell you which of the two you are looking at.

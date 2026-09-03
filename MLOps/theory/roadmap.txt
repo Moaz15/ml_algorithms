@@ -1,0 +1,226 @@
+MLOPS: ROADMAP AND SYLLABUS
+================================================================================
+
+Scope
+--------------------------------------------------------------------------------
+ML_Lifecycle/ covers the modelling lifecycle (framing -> features -> model ->
+evaluation) and ends with three stage notes: 11_deployment_and_serving,
+12_monitoring_and_drift, 13_mlops_versioning_retraining. This folder expands
+that tail into the engineering discipline: how a model becomes a versioned,
+tested, observable, retrainable production system. Do not re-derive lifecycle
+content here; reference it.
+
+The one framing to memorise
+--------------------------------------------------------------------------------
+DevOps versions one artefact: code. MLOps versions three, and all three can
+break the system independently:
+
+        CODE  +  DATA  +  MODEL  =  behaviour
+
+So every DevOps practice needs a data/model analogue:
+    version control -> data + model versioning
+    unit tests      -> data validation + behavioural model tests
+    CI              -> continuous training (CT), not just CI/CD
+    monitoring      -> drift and quality monitoring, not just uptime
+
+Second framing: ML systems fail SILENTLY. A broken service pages you; a stale
+feature or a shifted distribution serves confident wrong answers indefinitely.
+
+--------------------------------------------------------------------------------
+PHASE 1: FOUNDATIONS (engineering hygiene)
+--------------------------------------------------------------------------------
+1. Reproducibility: seeds, pinned dependencies, lockfiles, deterministic
+   preprocessing. What "reproducible" means when GPUs are non-deterministic.
+2. Environments and containers: virtualenv vs Docker, image layers, why
+   training and serving images diverge, GPU base images.
+3. Repo structure: separating library code from notebooks and pipeline configs;
+   config management (Hydra / YAML) over hard-coded constants.
+4. CI for ML repos: lint, unit tests, smoke-train on a data sample.
+5. The test pyramid for ML:
+     - data tests        schema, ranges, nulls, cardinality, freshness
+     - feature tests     transformation unit tests, offline/online parity
+     - model tests       invariance, directional expectation, minimum
+                         performance on a frozen slice, inference latency
+     - pipeline tests    end-to-end on a tiny fixture dataset
+
+--------------------------------------------------------------------------------
+PHASE 2: DATA AND FEATURE INFRASTRUCTURE
+--------------------------------------------------------------------------------
+1. Data versioning: DVC / lakeFS / Delta-Iceberg table versions; immutable
+   snapshots vs mutable tables; why "SELECT * FROM users" is not reproducible.
+2. Data contracts: producer-consumer schema agreements, breaking vs additive
+   changes, enforcement at ingestion.
+3. Data validation in production: Great Expectations / Deequ / TFDV; distribution
+   checks vs schema checks; failing loudly vs quarantining bad rows.
+4. Feature stores: offline store (training) vs online store (serving), the
+   single feature definition, materialisation, TTL and freshness SLAs.
+5. Point-in-time correctness: as-of joins, label windows, the gap requirement.
+   This is the anti-leakage machinery -> see ../../data_leakage.txt.
+6. Training/serving skew: the three sources -- different code paths, different
+   data sources, feedback loops. Detection by logging serving features and
+   replaying them offline.
+
+--------------------------------------------------------------------------------
+PHASE 3: EXPERIMENT TRACKING AND MODEL REGISTRY
+--------------------------------------------------------------------------------
+1. What to log per run: code commit, data version, config, metrics, artefacts,
+   environment. Lineage = being able to answer "what produced this prediction".
+2. Tools: MLflow, Weights and Biases, Neptune. Tracking vs registry vs artefact
+   store -- three separate jobs.
+3. Model registry: stages (none/staging/production/archived), promotion gates,
+   approval, rollback. The registry is the source of truth, not a file on S3.
+4. Model cards and documentation: intended use, training data, evaluation
+   slices, known limitations.
+
+--------------------------------------------------------------------------------
+PHASE 4: PIPELINES AND ORCHESTRATION
+--------------------------------------------------------------------------------
+1. Why pipelines beat notebooks: idempotency, retries, partial reruns, lineage.
+2. DAG orchestrators: Airflow, Dagster, Prefect; ML-specific: Kubeflow
+   Pipelines, Vertex/SageMaker Pipelines, Metaflow.
+3. Core concepts: task idempotency, backfills, scheduling vs event triggers,
+   caching step outputs, parameterised runs.
+4. Batch vs streaming ingestion: Spark / Beam / Flink at a conceptual level.
+5. Distributed training basics: data parallel vs model parallel, parameter
+   server vs all-reduce, effective batch size and learning-rate scaling.
+   -> see ../../optimization_gradient_descent.txt section 3.
+
+--------------------------------------------------------------------------------
+PHASE 5: PACKAGING AND SERVING
+--------------------------------------------------------------------------------
+1. Serving patterns and when each applies:
+     batch / offline scoring      precomputed, cheap, stale
+     online / real-time REST-gRPC fresh, latency-bound
+     streaming                    event-driven, near-real-time
+     embedded / on-device         no network, privacy, tight resources
+2. Latency budget decomposition: feature fetch + preprocessing + inference +
+   post-processing + network. p50 vs p99, tail latency, timeouts, graceful
+   degradation to a default or a simpler model.
+3. Packaging: pickle pitfalls, ONNX, TorchScript, TF SavedModel; servers --
+   FastAPI, BentoML, TorchServe, Triton, KServe.
+   Repo example: ../../Logistic_Regression/scratch_code/main.py
+4. Throughput: dynamic batching, concurrency, caching, model warm-up, cold
+   starts, autoscaling and scale-to-zero.
+5. Inference optimisation: quantisation, pruning, distillation, hardware choice.
+
+--------------------------------------------------------------------------------
+PHASE 6: DEPLOYMENT STRATEGIES
+--------------------------------------------------------------------------------
+1. Shadow / dark launch: serve live traffic to the new model, log, discard
+   output. The safest first step and the standard answer for "how do you
+   validate before exposing users".
+2. Canary: small traffic percentage, automated metric gates, progressive ramp.
+3. Blue-green: two full environments, instant switch, instant rollback.
+4. A/B test: the only way to measure business impact. Randomisation unit,
+   sample size and MDE, guardrail metrics, duration and novelty effects.
+5. Multi-armed bandits: when to prefer adaptive allocation over a fixed split.
+6. Rollback: model rollback is not code rollback -- it may require the old
+   feature definitions too. Every deployment needs a tested reverse path.
+
+--------------------------------------------------------------------------------
+PHASE 7: MONITORING AND OBSERVABILITY
+--------------------------------------------------------------------------------
+1. Four layers, in the order you should build them:
+     operational   latency, throughput, error rate, saturation, cost
+     data          schema violations, null rate, freshness, volume
+     distribution  input drift (PSI, KS, chi-square, Wasserstein), prediction
+                   drift, embedding drift
+     quality       accuracy/AUC once labels land, calibration, slice metrics
+2. Drift vocabulary, kept straight:
+     covariate shift  p(x) moves, p(y|x) stable        -> often recalibrate
+     prior shift      p(y) moves                       -> adjust intercept
+     concept drift    p(y|x) moves                     -> retrain
+     sudden vs gradual vs seasonal vs recurring
+3. The label-lag problem: quality metrics are delayed by days or months, so
+   distribution monitoring is the early-warning proxy.
+4. Calibration monitoring: predicted positive rate versus observed rate.
+   -> see ../../probability_calibration.txt section 7.
+5. Feedback loops and censored labels: blocked transactions produce no
+   chargebacks, rejected loans never default. Reject inference; holdout
+   traffic reserved for unbiased measurement.
+6. Alerting that people do not mute: thresholds versus statistical tests,
+   windowing, and what a runbook entry looks like.
+7. Prediction logging for replay and debugging; sampling strategy; PII.
+
+--------------------------------------------------------------------------------
+PHASE 8: RETRAINING AND CONTINUOUS TRAINING
+--------------------------------------------------------------------------------
+1. Trigger policy: scheduled, drift-triggered, performance-triggered,
+   data-volume-triggered. Trade-offs of each.
+2. What "retrain" means precisely: same hyperparameters on fresh data, versus
+   re-tuning, versus re-architecting. Only the first should be automated.
+3. Champion-challenger: automated evaluation gate before promotion; never
+   auto-promote on training metrics alone.
+4. Training window choice: expanding versus rolling, recency weighting,
+   handling seasonality. -> see ../../cross_validation.txt section 4.3.
+5. Online / incremental learning: when it is worth the operational risk, and
+   the catastrophic-feedback failure mode.
+6. Automated rollback on regression; canary the retrained model like any deploy.
+
+--------------------------------------------------------------------------------
+PHASE 9: GOVERNANCE, SECURITY, COST
+--------------------------------------------------------------------------------
+1. Auditability: reproduce any historical prediction from lineage.
+2. Privacy: PII handling, minimisation, retention, right-to-deletion versus a
+   model trained on the deleted data; differential privacy at a concept level.
+3. Access control and secrets; model and feature-store permissions.
+4. Model risk and fairness sign-off -> ML_Lifecycle/theory/10_*.
+5. Security: model theft/extraction, adversarial and poisoning inputs,
+   dependency supply chain.
+6. Cost: training versus serving cost, GPU utilisation, spot instances, cache
+   hit rate, the cost of a p99 latency target. Cost is a design constraint.
+
+--------------------------------------------------------------------------------
+PHASE 10: MATURITY AND SYSTEM DESIGN
+--------------------------------------------------------------------------------
+1. Maturity levels (Google's framing): level 0 manual, level 1 automated
+   training pipeline, level 2 full CI/CD/CT. Know which level a described
+   system is at and what the next increment costs.
+2. Reference architecture to be able to draw from memory:
+     sources -> ingestion -> feature pipeline -> [offline store | online store]
+             -> training pipeline -> registry -> serving -> logging
+             -> monitoring -> retraining trigger (closes the loop)
+3. Design-interview drill: "design the ML platform / serving system for X".
+   Always state: prediction moment, latency budget, freshness requirement,
+   label availability, retraining cadence, rollback plan, monitoring plan.
+4. Where models really die: upstream schema changes, stale features, skew
+   between offline and online code, and unmonitored feedback loops. Not model
+   choice.
+
+--------------------------------------------------------------------------------
+TOOLING MAP (know the category, one tool per category is enough)
+--------------------------------------------------------------------------------
+    data versioning        DVC, lakeFS, Delta Lake, Iceberg
+    data validation        Great Expectations, Deequ, TFDV
+    feature store          Feast, Tecton, Vertex/SageMaker Feature Store
+    tracking + registry    MLflow, Weights and Biases
+    orchestration          Airflow, Dagster, Kubeflow, Metaflow
+    serving                FastAPI, BentoML, Triton, TorchServe, KServe
+    monitoring             Evidently, WhyLabs, Arize, Prometheus + Grafana
+    infra                  Docker, Kubernetes, Terraform
+
+--------------------------------------------------------------------------------
+HANDS-ON MILESTONES (do these in order, in this repo)
+--------------------------------------------------------------------------------
+1. Containerise the existing Logistic_Regression FastAPI service; pin deps.
+2. Add data validation and a model-quality gate as a test that fails the build.
+3. Put training behind a config file and log runs to MLflow, including data
+   version and commit.
+4. Register the model, load it in the service from the registry rather than a
+   local .npy, and script a rollback.
+5. Log predictions and inputs; compute PSI weekly against the training window.
+6. Add a retraining trigger on drift with champion-challenger promotion.
+
+--------------------------------------------------------------------------------
+INTERVIEW FOCUS (what actually gets asked)
+--------------------------------------------------------------------------------
+- Batch versus online serving, and how you choose.
+- How you detect and diagnose an offline/online performance gap.
+- Drift taxonomy, and which drift type calls for recalibration versus retraining.
+- Training/serving skew: causes and prevention.
+- Safe rollout: shadow -> canary -> A/B, with gates and rollback.
+- Retraining trigger design and why full automation is risky.
+- Reproducing a six-month-old prediction.
+- Monitoring when labels arrive months late.
+
+Companion file to write next: interview_qa.txt in this folder.

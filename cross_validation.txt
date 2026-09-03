@@ -1,0 +1,368 @@
+CROSS-VALIDATION: SCHEMES, PITFALLS, NESTED CV, AND INTERVIEW Q&A
+================================================================================
+
+ML_Lifecycle/theory/04_data_splitting_validation.txt covers this as a process
+step in the lifecycle. This note is the concept-and-pitfalls version: what the
+CV estimate actually estimates, how each scheme differs, and the ways it lies.
+
+--------------------------------------------------------------------------------
+1. WHAT WE ARE TRYING TO ESTIMATE
+--------------------------------------------------------------------------------
+
+Training error is not an estimate of anything useful: the model chose its
+parameters to make it small. We want the expected error on data drawn from the
+same distribution but not seen during fitting:
+
+    Generalisation error = E_(x,y)[ loss(y, f_hat_D(x)) ]
+
+Two subtly different targets, and the distinction resolves several arguments:
+
+    Conditional error   the error of THIS fitted model, trained on THIS D.
+                        What you care about when you are about to ship it.
+    Expected error      the error of the (algorithm, n) pair, averaged over
+                        training sets. What k-fold CV actually estimates,
+                        because each fold refits on a different subset.
+
+So k-fold CV evaluates a PROCEDURE, not a model. That is why "which of the k
+models do I deploy?" is a category error -- you refit on all the data at the end
+and rely on CV to have told you that the procedure generalises.
+
+--------------------------------------------------------------------------------
+2. THE SPLITS AND WHAT EACH IS FOR
+--------------------------------------------------------------------------------
+
+    Train        fit parameters.
+    Validation   choose hyperparameters, features, model family, threshold.
+    Test         estimate error ONCE, after all choices are frozen.
+
+Every time you look at the test set and change something, it becomes a
+validation set and its estimate becomes optimistic. Treat it as write-once.
+
+Single hold-out, the problems with it:
+    1. High variance. With 20% held out of 1000 rows, the estimate rests on 200
+       points; a couple of unlucky rows move the number by percent.
+    2. Wastes data. The model you evaluate was trained on 80% of what the
+       shipped model will see, so the estimate is pessimistic for small n.
+    3. One arbitrary partition. Different seeds give different winners in a
+       model comparison, which is how people fool themselves.
+
+k-fold CV fixes 1 and 2 by making every point a test point exactly once.
+
+--------------------------------------------------------------------------------
+3. K-FOLD MECHANICS AND THE CHOICE OF K
+--------------------------------------------------------------------------------
+
+Partition the data into k roughly equal folds. For each fold j: train on the
+other k-1 folds, predict fold j. Every point gets exactly one out-of-fold
+prediction. Report the mean of the fold scores AND their standard deviation --
+the spread is information, not noise to be hidden.
+
+    CV_k = (1/k) * sum_j score(fold j)
+
+Bias-variance of the ESTIMATOR (not of the model -- keep these separate):
+
+    k small (e.g. 2)   each model trains on little data, so it is worse than the
+                       final model  ->  the error estimate is PESSIMISTIC
+                       (upward bias). Low variance, cheap.
+    k large (e.g. n)   each model trains on nearly all the data  ->  low bias.
+                       But the k training sets are almost identical, so the k
+                       scores are highly correlated and averaging them does not
+                       reduce variance much. Expensive.
+
+    k = 5 or 10 is the standard compromise, empirically well supported.
+
+LOOCV specifics:
+    - Nearly unbiased for the expected error.
+    - High variance despite averaging n numbers, for the correlation reason
+      above; also its models differ by one point, so it cannot see instability
+      that comes from resampling.
+    - For linear models it is nearly free via the hat matrix (the PRESS
+      statistic / generalised cross-validation shortcut), which is why it is
+      standard for ridge but not for gradient boosting.
+    - For classification it is awkward: each test fold has one label, so
+      per-fold accuracy is 0 or 1, and stratification is impossible.
+
+Repeated k-fold: run the whole thing with several different random partitions
+and average. Reduces the variance due to the arbitrary partition, at linear
+cost. Cheap and underused for small datasets.
+
+--------------------------------------------------------------------------------
+4. SCHEME SELECTION -- MATCH THE SPLIT TO THE DEPENDENCE STRUCTURE
+--------------------------------------------------------------------------------
+
+The default KFold assumes i.i.d. rows. Almost no real dataset satisfies that.
+Ask: "what does the model need to generalise ACROSS at deployment time?" and
+split along that axis.
+
+4.1 Stratified k-fold
+    Preserve the class proportions in every fold. Mandatory for imbalanced
+    classification -- with 1% positives and 10 folds on 500 rows, plain KFold
+    can produce a fold with zero positives, making the fold score undefined or
+    meaningless. Also worth doing for regression by binning the target, when the
+    target is skewed. Cost: nothing. Just use it.
+
+4.2 Group / leave-one-group-out
+    When rows share a source that will not be shared at prediction time:
+    multiple visits per patient, multiple sessions per user, several photos of
+    the same object, repeated measurements per device. Random splitting puts the
+    same patient in train and test, the model memorises the patient, and the
+    score is inflated -- the model has learned identity, not the disease.
+    Rule: if the deployment question is "a NEW patient walks in", the split must
+    be by patient. See data_leakage.txt section on group leakage.
+
+4.3 Time-series CV
+    Random folds train on the future and predict the past, which is both
+    impossible in deployment and wildly optimistic when there is any trend or
+    autocorrelation. Use forward-chaining:
+
+        Expanding window (grows the train set):
+            train [1..100]        test [101..120]
+            train [1..120]        test [121..140]
+            train [1..140]        test [141..160]
+
+        Rolling window (fixed train size, for non-stationary data):
+            train [  1..100]      test [101..120]
+            train [ 21..120]      test [121..140]
+
+    Refinements that matter in practice:
+      - GAP / embargo. If the label at time t is computed from a window
+        [t, t+h] (e.g. 30-day churn), then a training row at t-1 partially
+        overlaps a test row at t. Insert a gap of at least h between train and
+        test. In finance this is "purging and embargoing".
+      - Match the horizon. If you predict 7 days ahead in production, test at a
+        7-day-ahead horizon, not one step.
+      - Retraining cadence. If prod retrains weekly, the backtest should
+        retrain weekly too, otherwise you are measuring a model that will
+        never exist.
+
+4.4 Spatial / hierarchical / nested structure
+    Same principle: block along the axis of correlation. Spatial data needs
+    spatially blocked folds; store sales need store-level or region-level
+    grouping if you are forecasting for new stores.
+
+4.5 Choosing, in one table
+
+    Deployment question                       Scheme
+    ---------------------------------------   -------------------------------
+    New i.i.d. rows, balanced                 KFold
+    New i.i.d. rows, imbalanced               StratifiedKFold
+    New user / patient / device               GroupKFold (by that entity)
+    Future time periods                       TimeSeriesSplit + gap
+    New entity AND future time                grouped time-based split
+    Very small n                              Repeated stratified k-fold / LOOCV
+
+--------------------------------------------------------------------------------
+5. THE GOLDEN RULE: EVERYTHING FITTED GOES INSIDE THE FOLD
+--------------------------------------------------------------------------------
+
+Any step that LEARNS from data is part of the model and must be refit on each
+training fold only:
+
+    scaling and normalisation      (mean/std learned from data)
+    imputation                     (mean/median/model learned from data)
+    target / mean encoding         (per-category target statistics -- the worst
+                                    offender, needs inner folds of its own)
+    feature selection              (correlation filters, RFE, importance cuts,
+                                    univariate tests)
+    dimensionality reduction       (PCA components, embeddings)
+    resampling for imbalance       (SMOTE must see only the training fold, and
+                                    must never touch the validation fold)
+    calibration                    (Platt/isotonic fitted on data the model did
+                                    not train on -- see probability_calibration)
+    outlier removal                (a threshold learned from the full data)
+
+Scaling before splitting is the classic. The leak is small but real: the test
+fold's mean and variance bleed into the training transformation. With SMOTE
+before splitting, the leak is enormous -- synthetic points interpolated from
+training rows land in the validation fold, so the model is scored on near-copies
+of what it trained on, and AUC can go from 0.75 to 0.95 for free.
+
+Practical enforcement: put every step in a Pipeline and cross-validate the
+pipeline, not the estimator. Then correctness is structural rather than a thing
+you have to remember.
+
+--------------------------------------------------------------------------------
+6. NESTED CV (and the selection bias that makes it necessary)
+--------------------------------------------------------------------------------
+
+The problem. You try 200 hyperparameter configurations, take the best CV score,
+and report it. That number is biased optimistically, and the mechanism is the
+maximum of noisy estimates: each configuration's CV score is the truth plus
+noise, and argmax over 200 of them selects partly for a genuinely good
+configuration and partly for a lucky one. The winner's score therefore contains
+the luck. The bias grows with the number of configurations and shrinks with the
+size of the validation data.
+
+The fix. Two loops:
+
+    outer loop (k_out folds)   -> estimates generalisation error
+        inner loop (k_in folds on the outer training part) -> selects hyperparams
+        refit on the whole outer training part with the selected hyperparams
+        score once on the outer test fold
+
+    Nested CV score = mean of the outer fold scores.
+
+The inner loop may choose DIFFERENT hyperparameters in different outer folds.
+That is not a bug, and it is the second thing people trip on: nested CV
+evaluates the tuning PROCEDURE, it does not produce one model. Getting a final
+model is a separate step -- run the inner selection once on all the data and
+refit. If the chosen hyperparameters swing wildly across outer folds, that is a
+useful warning that your selection is unstable and the hyperparameter barely
+matters.
+
+Cost: k_out * k_in * n_configs fits. When you cannot afford it, the honest
+cheap alternative is a genuinely untouched hold-out test set used exactly once.
+
+--------------------------------------------------------------------------------
+7. USING CV FOR SELECTION: THE ONE-STANDARD-ERROR RULE
+--------------------------------------------------------------------------------
+
+Fold scores give you a mean and a standard error, se = std / sqrt(k). When two
+configurations are within one standard error of each other, the difference is
+noise. The one-standard-error rule: among all configurations whose score is
+within one se of the best, pick the SIMPLEST (largest lambda, shallowest tree,
+fewest features).
+
+Rationale: the CV curve is flat near its optimum, so you give up almost nothing
+in estimated error and buy real robustness, plus a model that is less likely to
+have been selected by luck. This is the standard practice for choosing lambda in
+ridge and lasso.
+
+Also: because the fold scores are computed on overlapping training sets, they
+are not independent, so se underestimates the true uncertainty and a paired
+t-test across folds is anti-conservative. Use it as a rough guide, not a p-value.
+
+--------------------------------------------------------------------------------
+8. WHAT CROSS-VALIDATION CANNOT DO
+--------------------------------------------------------------------------------
+
+    1. It cannot detect distribution shift. CV resamples the data you have, so
+       it estimates error under the TRAINING distribution. If production drifts,
+       CV was answering a different question. That is monitoring's job
+       (ML_Lifecycle/theory/12_monitoring_and_drift.txt).
+    2. It cannot fix leakage, and it will faithfully report the inflated score
+       that leakage produces. A suspiciously good CV number is evidence of a
+       leak, not of a good model.
+    3. It cannot compensate for a wrong split axis. Random folds on grouped or
+       temporal data give a confidently wrong number.
+    4. It is unstable when n is small -- the very regime where you most want it.
+       Use repeated CV and report the spread.
+    5. It says nothing about feedback effects: a recommender that changes user
+       behaviour cannot be evaluated offline alone, which is why online A/B
+       tests exist.
+    6. It measures average error, not the tail, the per-segment error, or
+       fairness across groups. Slice your out-of-fold predictions
+       (ML_Lifecycle/theory/10_error_analysis_and_fairness.txt).
+
+Bonus use: the out-of-fold predictions themselves are valuable. They are the
+input to stacking, the right data for choosing a threshold, and the right data
+for fitting a calibrator.
+
+--------------------------------------------------------------------------------
+9. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+Cross-validation estimates how a training procedure generalises by refitting on
+several partitions so that every point is used for validation exactly once,
+which removes the variance and the wastefulness of a single hold-out. k trades
+off the bias and variance of the ESTIMATE -- small k means each model sees less
+data and the estimate is pessimistic, k equal to n is nearly unbiased but its
+folds are so correlated that averaging barely helps -- so 5 or 10 is standard.
+The split must be chosen to match the dependence structure and the deployment
+question: stratified for imbalance, grouped when rows share a user or patient,
+forward-chaining with a gap for time series. Everything that learns from data --
+scaling, imputation, target encoding, feature selection, SMOTE -- must be refit
+inside each training fold, which is what pipelines are for. And if you tune
+hyperparameters on the CV score, that score is optimistically biased by
+selection, so you need nested CV or a genuinely untouched test set to report an
+honest number.
+
+--------------------------------------------------------------------------------
+10. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Why is 5 or 10 folds standard rather than n?
+A: k controls the bias-variance trade-off of the error estimate. Small k trains
+each model on much less data than the final model will get, so the estimate is
+pessimistically biased. LOOCV has almost no such bias, but its n training sets
+differ by a single point, so the n scores are highly correlated and averaging
+them removes much less variance than the count suggests -- and it costs n fits.
+Five or ten sits near the empirical sweet spot. The exception is linear models
+with a closed-form LOOCV shortcut, where the cost argument disappears.
+
+Q: You get 0.94 AUC in CV and 0.71 in production. Walk me through it.
+A: I would rank the hypotheses by prior probability. First, leakage -- a feature
+that is unavailable or computed differently at serving time, or preprocessing
+fitted before the split; I would check feature importance for a suspiciously
+dominant feature and verify point-in-time availability for the top features.
+Second, the wrong split axis -- if rows are grouped by user or ordered in time
+and I used random folds, CV was answering an easier question than production
+asks. Third, genuine distribution shift between the training window and now.
+Fourth, selection bias if I tuned heavily against that CV score. Fifth, a
+train/serve skew bug in the feature pipeline. The diagnostic that separates
+leakage from shift is a temporal backtest: if training on old data and testing
+on the most recent period reproduces the 0.71, it is shift or a bad split; if it
+still shows 0.94, it is leakage or serving skew.
+
+Q: Can you use k-fold CV on time-series data?
+A: Not the standard random version. Random folds train on future observations to
+predict past ones, which is impossible in deployment, and with autocorrelation
+the neighbouring points in the training folds are near-duplicates of the test
+points, so the estimate is badly optimistic. Use forward chaining with an
+expanding or rolling window, insert a gap at least as long as the label horizon
+so overlapping label windows do not straddle the boundary, and evaluate at the
+same forecast horizon and retraining cadence you will use in production.
+Follow-up: when would a rolling window beat an expanding one? When the process
+is non-stationary and old data actively misleads -- then a fixed recent window
+is a feature, not a limitation.
+
+Q: What is nested cross-validation and when do you actually need it?
+A: An inner CV loop selects hyperparameters and an outer loop estimates error,
+so the data used to select is never the data used to report. You need it when
+the selection is aggressive relative to the data -- many configurations, small
+dataset -- because taking the max over many noisy CV scores captures the luck as
+well as the quality, biasing the reported number upward. With a large dataset a
+single untouched hold-out is simpler and just as honest. And nested CV does not
+hand you a model: it evaluates the procedure, so the final model comes from
+running the selection once on all the data and refitting.
+
+Q: You SMOTE your minority class and CV AUC jumps from 0.75 to 0.95. Are you
+happy?
+A: No, that is the signature of resampling before splitting. SMOTE creates
+synthetic minority points by interpolating between real ones, so if it runs
+before the fold split, the validation fold contains points interpolated from
+training rows -- near-duplicates of training data. The model is being scored on
+what it memorised. The fix is to resample inside the training fold only, and
+never to resample the validation fold, which must keep the true class balance
+because that is the balance production has. Done correctly, resampling usually
+gives a modest change, and threshold tuning on a calibrated model often beats it
+outright.
+
+Q: Your dataset has multiple rows per customer. How do you split?
+A: By customer, using grouped folds, provided the deployment question is
+"predict for a customer we have not seen". With random row-level splits the same
+customer appears in train and test, so the model can memorise customer-specific
+quirks and the score reflects recall of identity rather than generalisation.
+If instead production always has history for the customer and I am predicting
+their next event, then row-level splitting is not automatically wrong -- but the
+split must still respect time, so the right scheme is grouped and time-ordered.
+The rule is to split along whatever axis the model must generalise across.
+
+Q: Should you report the mean CV score or something else?
+A: Mean and standard deviation, always both. The spread tells you whether a
+difference between models is real and whether the procedure is stable -- a model
+scoring 0.80 plus or minus 0.01 is a different proposition from 0.80 plus or
+minus 0.09, and only the first supports a confident claim. I would then apply
+the one-standard-error rule for selection, preferring the simplest model within
+one standard error of the best, and I would look at the worst fold to understand
+what makes it hard. Note the fold scores are not independent because the
+training sets overlap, so the standard error understates the real uncertainty
+and I would not turn it into a p-value.
+
+Q: Is there any leakage risk in cross-validation itself, even with pipelines?
+A: Yes, two kinds. First, repeated use: every hyperparameter decision, feature
+choice and threshold tuned against the same CV partition leaks information
+gradually, which is the selection bias nested CV addresses. Second, duplicate or
+near-duplicate rows -- pipelines cannot help you if the same record appears
+twice and lands in different folds, and this is common after joins or in scraped
+data. So deduplicate before splitting, and split on the entity, not the row.

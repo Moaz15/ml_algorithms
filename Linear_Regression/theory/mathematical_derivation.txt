@@ -1,20 +1,5 @@
 LINEAR REGRESSION — MATHEMATICAL DERIVATION
 ===========================================
-The shared math for SLR, MLR and PLR. SLR is the d = 1 case; PLR is MLR on
-manufactured columns. Intuition and examples live in SLR/, MLR/, PLR/concept.txt;
-assumptions and metrics in assumptions.txt and evaluation_metrics.txt.
-
-    Part 0  Notation and key results
-    Part 1  The objective: why squared error
-    Part 2  SLR closed form (scalar calculus)
-    Part 3  MLR closed form (matrix calculus)
-    Part 4  Geometry: OLS is a projection
-    Part 5  When XᵀX is singular
-    Part 6  Gradient descent
-    Part 7  Ridge and Lasso
-    Part 8  Properties of β̂
-    Part 9  Computational cost
-
 
 PART 0 — NOTATION AND KEY RESULTS
 ==============================================================================
@@ -35,7 +20,8 @@ Error vs residual — different things:
     residual  eᵢ = yᵢ - xᵢᵀβ̂    estimated β̂, computable
 
 "Linear" means linear in the PARAMETERS. ŷ = β₀ + β₁x + β₂x² is linear
-regression (put x² in as a column). ŷ = β₀ + x^β₁ is not.
+regression (put x² in as a column). 
+ŷ = β₀ + x^β₁ is not.
 
 Everything derived below, in one place:
 
@@ -56,69 +42,115 @@ Everything derived below, in one place:
 PART 1 — THE OBJECTIVE: WHY SQUARED ERROR
 ==============================================================================
 
-    SSE(β) = Σᵢ (yᵢ - xᵢᵀβ)² = ||y - Xβ||²
-    MSE(β) = (1/n)·SSE(β)
-    J(β)   = (1/(2n))·SSE(β)     the ½ cancels the 2 from differentiating
+Before we can find the best line we have to decide what "best" means. Any
+candidate β makes n mistakes at once,
 
-The 1/n and ½ do not move the minimizer, only rescale the gradient (and so the
-learning rate you need).
+    eᵢ = yᵢ - xᵢᵀβ
 
-Three reasons to square:
+and we cannot minimize n numbers, so they have to collapse into one score.
 
-1. Differentiability. |e| has no derivative at 0 and yields no closed form. e²
-   is smooth and convex, so ∇ = 0 gives a solvable linear system.
+First attempt: add them. Σeᵢ. Dead on arrival — a line that misses by +100 and
+by -100 scores a perfect zero. Cancellation means the score has to be blind to
+the SIGN of a mistake, and there are two natural ways to blind it: |e| and e².
 
-2. It is MLE under Gaussian noise. With ε ~ N(0, σ²I):
+They are both legitimate, and they quietly answer different questions.
 
-       L(β) = Πᵢ (1/√(2πσ²))·exp( -(yᵢ - xᵢᵀβ)²/(2σ²) )
+    |e|   every point pulls on the line with the same force no matter how
+          wrong it is (d|e|/de = ±1). Robust, and it lands on the conditional
+          MEDIAN. 
+          Price: no derivative at 0, so no closed form — you iterate.
+
+    e²    the pull grows with the mistake (de²/de = 2e), so a point twice as
+          far away pulls twice as hard and gets prioritized.
+
+Choosing e² is what makes the rest of this file possible:
+
+1. It is SOLVABLE. e² is smooth and convex, so setting ∇ = 0 gives a linear
+   system with an exact answer (PART 3). This is the reason linear regression
+   has a formula at all when almost nothing else does.
+
+2. It is the HONEST choice if the noise is Gaussian — i.e. it is the MLE. With
+   ε ~ N(0, σ²I):
+
+       L(β)     = Πᵢ (1/√(2πσ²))·exp( -(yᵢ - xᵢᵀβ)²/(2σ²) )
        log L(β) = -(n/2)log(2πσ²) - (1/(2σ²))·Σᵢ(yᵢ - xᵢᵀβ)²
 
-   Only the last term depends on β, so maximizing likelihood IS minimizing SSE.
-   Laplace errors give MAE by the same argument.
+   Only the last term involves β, so maximizing likelihood IS minimizing
+   Σeᵢ². Squared error was never a convention — it is an assumption about the
+   noise. Swap in Laplace noise and the same argument hands you MAE.
 
-3. It targets the conditional mean. The minimizer of E[(y - f(x))²] over all
-   functions f is f(x) = E[y|x]. Absolute error targets the median instead.
+3. It answers the question "what is the average y around here?". The minimizer
+   of E[(y - f(x))²] over all functions f is f(x) = E[y|x], the conditional
+   mean.
 
-The cost: loss grows quadratically in the residual, so one far-out point can
-dominate the fit. OLS is not robust to outliers — that is the price of the
-closed form. Alternatives: Huber, quantile regression, RANSAC.
+So the objective, and its cosmetic variants:
+
+    SSE(β) = Σᵢ (yᵢ - xᵢᵀβ)² = ||y - Xβ||²
+    MSE(β) = (1/n)·SSE(β)
+    J(β)   = (1/(2n))·SSE(β)     the ½ pre-cancels the 2 from differentiating
+
+The 1/n and the ½ do not move the minimizer — only the scale of the gradient,
+and hence the learning rate you need.
+
+Now the bill. Because the pull grows with distance, a point 10× further out
+contributes 100× the error and drags the line toward itself. OLS is not robust
+to outliers, and that is not a flaw to be patched: it is the same property that
+bought us the closed form and the conditional mean. If you need robustness you
+have to give one of those up — Huber (quadratic near 0, linear in the tails),
+quantile regression, or RANSAC.
 
 
 PART 2 — SLR CLOSED FORM
 ==============================================================================
 
-Model ŷᵢ = m·xᵢ + c, so SSE(m, c) = Σ(yᵢ - m·xᵢ - c)². A quadratic bowl, so the
-stationary point is the global minimum.
+PART 1 settled the score. Now the easiest possible case — one feature, two
+knobs — and we cash in the promise that squaring buys an exact answer:
 
-Partial derivatives:
+    ŷᵢ = m·xᵢ + c        SSE(m, c) = Σ(yᵢ - m·xᵢ - c)²
 
-    ∂SSE/∂c = -2 Σ (yᵢ - m·xᵢ - c)
-    ∂SSE/∂m = -2 Σ xᵢ(yᵢ - m·xᵢ - c)
+SSE is quadratic in (m, c), so its surface is a bowl. A bowl has exactly one
+flat spot and it is the bottom, which is the whole reason we can just solve for
+it instead of walking downhill: find where the surface is flat in both
+directions and you are done. Two knobs, so two equations.
 
-Setting both to zero gives the normal equations:
+    ∂SSE/∂c = -2 Σ (yᵢ - m·xᵢ - c)  = 0
+    ∂SSE/∂m = -2 Σ xᵢ(yᵢ - m·xᵢ - c) = 0
 
-    (1)  Σyᵢ   = m Σxᵢ  + n·c
-    (2)  Σxᵢyᵢ = m Σxᵢ² + c Σxᵢ
+These are the normal equations, and each one is a readable statement about the
+residuals eᵢ rather than a piece of algebra:
+
+    (1)  Σeᵢ    = 0      the line sits level with the data — as much above as
+                         below. Rearranged:  Σyᵢ = m Σxᵢ + n·c
+    (2)  Σxᵢeᵢ  = 0      no leftover relationship between x and what is left
+                         over. If there were, tilting the line would still be
+                         earning something. Rearranged:  Σxᵢyᵢ = m Σxᵢ² + c Σxᵢ
+
+Condition (2) is orthogonality, and it is the seed of the projection picture in
+PART 4: the fit extracts everything about y that x can explain, and the
+residual keeps only what x knows nothing about.
 
 Step 1 — divide (1) by n:
 
     ȳ = m·x̄ + c     ⇒     c = ȳ - m·x̄
 
-Two facts fall out of this one line:
-  - The fitted line passes through the centroid (x̄, ȳ).
-  - ∂SSE/∂c = 0 is literally Σeᵢ = 0, so residuals of an intercept-containing
-    fit sum to zero BY CONSTRUCTION. "Residuals have mean zero" is an algebraic
-    identity, not a testable assumption. What you test is zero mean CONDITIONAL
-    on x — i.e. no pattern in the residual plot.
+Read what just happened: the intercept is not really a free parameter. Once the
+slope is chosen, c only slides the line up or down to pass through the centroid
+(x̄, ȳ). Every least-squares line with an intercept goes through the mean point.
 
-Step 2 — substitute c into (2):
+Corollary worth stating loudly: since ∂SSE/∂c = 0 IS Σeᵢ = 0, residuals of an
+intercept-containing fit sum to zero by construction. "Residuals have mean
+zero" is an algebraic identity, not a testable assumption. What you actually
+test is zero mean CONDITIONAL on x — i.e. no pattern in the residual plot.
+
+Step 2 — substitute c into (2) to eliminate it and leave m alone:
 
     Σxᵢyᵢ = m Σxᵢ² + (ȳ - m·x̄)Σxᵢ
           = m Σxᵢ² + n·x̄·ȳ - m·n·x̄²          using Σxᵢ = n·x̄
 
     Σxᵢyᵢ - n·x̄·ȳ = m(Σxᵢ² - n·x̄²)
 
-Both sides are centered sums:
+Both sides turn out to be centered sums — the raw sums minus what you would
+expect from the means alone:
 
     S_xy = Σ(xᵢ - x̄)(yᵢ - ȳ) = Σxᵢyᵢ - n·x̄·ȳ
     S_xx = Σ(xᵢ - x̄)²        = Σxᵢ²  - n·x̄²
@@ -133,23 +165,38 @@ Therefore:
     │  c = ȳ - m·x̄                               │
     └────────────────────────────────────────────┘
 
-Three equivalent readings of the slope:
+The slope has a sentence attached to it: how much x and y move TOGETHER,
+divided by how much x moves on its own. The numerator is the signal, and the
+denominator is the price — if x barely varies, the same covariance has to be
+explained by a much steeper line, and the estimate gets unstable. That single
+ratio is where multicollinearity, low-variance features and large standard
+errors all come from later.
+
+Three equivalent readings, each useful somewhere else:
 
     m = Cov(x,y)/Var(x)                  covariance scaled by input spread
-      = r_xy·(s_y/s_x)                   correlation rescaled to y-units
-      = Σwᵢyᵢ,  wᵢ = (xᵢ - x̄)/S_xx       a weighted average of the y's
-                                         (this form makes Part 8 obvious)
+      = r_xy·(s_y/s_x)                   correlation rescaled into y-units;
+                                         |r| ≤ 1 is why the fitted line is
+                                         always flatter than the data's own
+                                         spread — regression to the mean
+      = Σwᵢyᵢ,  wᵢ = (xᵢ - x̄)/S_xx       a weighted average of the y's, so β̂ is
+                                         LINEAR in y (this form makes PART 8's
+                                         unbiasedness and variance immediate)
 
-Degenerate case: S_xx = 0 means x is constant, and the slope is 0/0 — a vertical
-strip of points has no unique line. Hence the np.isclose guard in the code.
+Degenerate case: S_xx = 0 means x is constant, so the slope is 0/0. Sensible —
+a vertical strip of points supports infinitely many lines equally well, and
+there is nothing to divide the covariance by. Hence the np.isclose guard in the
+code rather than a crash.
 
-Second-order check. The Hessian is
+Second-order check, to confirm the bowl is genuinely a bowl:
 
     H = 2·[ Σxᵢ²  Σxᵢ ]      det(H) = 4(nΣxᵢ² - (Σxᵢ)²) = 4n·S_xx ≥ 0
           [ Σxᵢ    n  ]      trace(H) > 0
 
-so H is PSD, and positive definite whenever S_xx > 0. Stationary point ⇒ global
-minimum.
+so H is PSD, and positive definite whenever S_xx > 0. Note the determinant is
+n·S_xx again: the same quantity that has to be non-zero for the slope to exist
+is the one that has to be non-zero for the minimum to be unique. Stationary
+point ⇒ global minimum.
 
 
 PART 3 — MLR CLOSED FORM

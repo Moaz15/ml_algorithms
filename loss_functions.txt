@@ -1,0 +1,373 @@
+LOSS FUNCTIONS: WHAT THEY ESTIMATE, HOW TO CHOOSE, AND INTERVIEW Q&A
+================================================================================
+
+--------------------------------------------------------------------------------
+1. THE SETUP (three different objects people call "the loss")
+--------------------------------------------------------------------------------
+
+Keep these separate. Most confused answers come from collapsing them.
+
+    Training objective   what the optimiser minimises. Must be differentiable
+                         (or subdifferentiable) and cheap. Often a SURROGATE.
+    Evaluation metric    what you actually care about. Free to be
+                         non-differentiable (accuracy, F1, AUC, revenue).
+    Decision rule        how a prediction becomes an action (threshold, argmax).
+                         See decision_theory_and_thresholds if/when written.
+
+You almost never optimise the metric directly. You optimise a surrogate that is
+well-behaved, then tune the decision rule against the metric.
+
+Notation: y is the truth, y_hat the prediction, z the raw model score (logit or
+margin), p the predicted probability, n the number of samples.
+
+Empirical risk:
+    L(theta) = (1/n) * sum_i loss(y_i, f_theta(x_i))   [+ penalty, see
+                                                        regularization_concept.txt]
+
+--------------------------------------------------------------------------------
+2. THE CENTRAL IDEA: THE LOSS PICKS WHICH STATISTIC YOU ESTIMATE
+--------------------------------------------------------------------------------
+
+This is the one point that separates a senior answer from a memorised list.
+
+A model with enough capacity, trained to convergence, converges pointwise to the
+minimiser of the EXPECTED loss given x. That minimiser is a different summary of
+the conditional distribution p(y|x) for each loss:
+
+    Loss                      argmin over c of E[loss(y, c) | x]
+    ----------------------    ---------------------------------------
+    Squared error             the conditional MEAN      E[y|x]
+    Absolute error            the conditional MEDIAN
+    Pinball loss (tau)        the conditional QUANTILE at level tau
+    Log loss                  the conditional PROBABILITY  P(y=1|x)
+    0-1 loss                  the conditional MODE (majority class)
+
+Proof sketch for the two that get asked:
+
+  Squared error. d/dc E[(y-c)^2 | x] = -2 E[y-c | x] = 0  =>  c = E[y|x].
+  Absolute error. d/dc E[|y-c| | x] = P(y<c|x) - P(y>c|x) = 0  =>  c = median.
+    (Subgradient, since |.| is not differentiable at 0.)
+
+Consequences you can use immediately:
+  - "My regression is dragged around by outliers" is not a bug in the data, it
+    is what asking for a conditional mean MEANS. The mean is not robust; the
+    median is. Change the loss, not just the data.
+  - Skewed target (income, latency, revenue): mean and median differ a lot, so
+    MSE and MAE will produce visibly different models. Pick by which statistic
+    the business decision needs. Latency SLAs want a quantile, so pinball loss.
+  - If you need calibrated probabilities you must train with a loss whose
+    minimiser IS the probability. See section 6.
+
+--------------------------------------------------------------------------------
+3. REGRESSION LOSSES
+--------------------------------------------------------------------------------
+
+3.1 Squared error (MSE / L2)
+    loss = (y - y_hat)^2                gradient wrt y_hat = -2(y - y_hat)
+
+    Smooth, strongly convex, closed-form solution for linear models (see
+    Linear_Regression/theory/mathematical_derivation.txt). Gradient grows
+    linearly with the residual, so a single 100x outlier contributes 10000x the
+    error of a unit residual and dominates the fit.
+    Estimates: conditional mean. Units: squared (use RMSE to report).
+
+3.2 Absolute error (MAE / L1)
+    loss = |y - y_hat|                  gradient = -sign(y - y_hat)
+
+    Constant gradient magnitude: every point pulls with the same force
+    regardless of how wrong it is, which is exactly why it is robust.
+    Non-differentiable at 0, and that constant gradient makes convergence near
+    the optimum sloppy without a decaying learning rate.
+    Estimates: conditional median.
+
+3.3 Huber loss (the practical compromise)
+    loss = 0.5*(y-y_hat)^2                       if |y-y_hat| <= delta
+         = delta*|y-y_hat| - 0.5*delta^2         otherwise
+
+    Quadratic near zero (smooth gradients, fast convergence), linear in the
+    tails (bounded influence per point). Continuous with continuous first
+    derivative at |r| = delta, which is why the -0.5*delta^2 term is there.
+    delta is a hyperparameter with the units of y: tune it, or set it to a high
+    quantile of the residuals. delta -> infinity gives MSE, delta -> 0 gives MAE.
+
+3.4 Log-cosh
+    loss = log(cosh(y - y_hat))
+    Behaves like Huber (quadratic then linear) but is twice differentiable
+    everywhere and has no delta to tune. Convenient when a method needs a
+    Hessian; otherwise Huber is more standard and more interpretable.
+
+3.5 Quantile / pinball loss
+    loss = tau * r          if r >= 0        where r = y - y_hat
+         = (tau - 1) * r    if r <  0
+
+    Asymmetric: under-prediction costs tau per unit, over-prediction costs
+    (1-tau). tau = 0.5 is MAE scaled by half. Use directly for prediction
+    intervals: fit three models at tau = 0.05, 0.5, 0.95.
+    This is the right tool for "predict p99 latency" or "do not under-stock".
+
+3.6 Losses on transformed targets
+    MSLE    = (log(1+y) - log(1+y_hat))^2   penalises relative error, punishes
+                                            under-prediction more than over.
+    MAPE    = |y - y_hat| / |y|             undefined at y = 0, unbounded for
+                                            small y, and asymmetric in a way
+                                            that quietly biases predictions low.
+    Prefer log-transforming the target and using MSE, but remember that
+    exp(E[log y]) is a geometric mean, not E[y]: back-transformation is biased.
+
+3.7 Comparison
+
+    Loss      Outlier robust  Smooth   Estimates   Extra hyperparam
+    -------   --------------  -------  ----------  ----------------
+    MSE       no              yes      mean        none
+    MAE       yes             no (0)   median      none
+    Huber     yes             yes      ~mean/median delta
+    Log-cosh  yes             yes      ~mean       none
+    Pinball   yes             no (0)   quantile    tau
+
+--------------------------------------------------------------------------------
+4. CLASSIFICATION LOSSES
+--------------------------------------------------------------------------------
+
+4.1 Why not 0-1 loss directly
+    loss = 1{sign(z) != y}. It is the thing you actually care about, and it is
+    unusable as a training objective: piecewise constant, so the gradient is
+    zero almost everywhere and undefined at the jump; non-convex; and minimising
+    it exactly over a linear classifier is NP-hard. So we minimise a convex
+    surrogate that upper-bounds it. A surrogate is "classification-calibrated"
+    if driving it to its minimum also drives the 0-1 risk to the Bayes rate --
+    log loss, hinge and exponential all are.
+
+4.2 Log loss / binary cross-entropy
+    p = sigmoid(z)
+    loss = -[ y*log(p) + (1-y)*log(1-p) ]
+    gradient wrt z = (p - y)                <- clean, this is why logits are used
+
+    That gradient is the reason logistic regression is written in terms of z:
+    the sigmoid derivative cancels against the log, leaving prediction-minus-
+    truth, identical in form to the linear-regression gradient. See
+    Logistic_Regression/theory/BLR_mathematical_derivation.txt.
+
+    Unbounded: a confident wrong prediction (p -> 0 when y = 1) costs infinity.
+    This punishes overconfidence hard and is why numerical guards matter --
+    clip logits, add epsilon inside the log, or better, use a fused
+    log-sum-exp-stable implementation.
+
+    Multi-class version: softmax + categorical cross-entropy,
+    loss = -log(p_correct_class), gradient wrt logits = p - one_hot(y).
+
+4.3 Hinge loss (SVM)
+    loss = max(0, 1 - y*z)          with y in {-1, +1}
+
+    Zero once the margin exceeds 1: correctly classified, comfortably-separated
+    points contribute nothing to the gradient. That is the entire origin of
+    support vectors -- only points on or inside the margin matter. See
+    SVM/theory/soft_margin.txt.
+    Convex, not differentiable at the kink, and NOT a proper scoring rule:
+    the output is a margin, not a probability.
+    Squared hinge, max(0, 1-y*z)^2, is smooth and penalises large violations
+    more, at the cost of some outlier robustness.
+
+4.4 Exponential loss (AdaBoost)
+    loss = exp(-y*z)
+    Grows exponentially in the margin violation, so mislabelled points get
+    enormous weight -- this is precisely why AdaBoost degrades on noisy labels
+    while gradient boosting with log loss holds up better.
+    Its population minimiser is z = 0.5 * log(P(y=1|x)/P(y=-1|x)), i.e. half the
+    log-odds, which is how AdaBoost is reinterpreted as forward stagewise
+    additive modelling. See Ensemble_Learning/Boosting/theory/concept.txt.
+
+4.5 Focal loss
+    loss = -(1 - p_t)^gamma * log(p_t)
+    Cross-entropy scaled down for already-well-classified examples. With
+    gamma = 2, an example at p_t = 0.9 contributes 100x less than at gamma = 0.
+    Built for extreme foreground/background imbalance (dense object detection);
+    for tabular imbalance, class weights or threshold tuning usually beat it.
+    See handling_imbalanced_data.txt.
+
+4.6 Margin view (the unifying picture)
+    All of these are functions of the margin m = y*z, decreasing in m:
+
+        0-1          step at m = 0
+        Hinge        kinked line, flat after m = 1
+        Log loss     smooth, asymptotes to 0, never exactly 0
+        Exponential  smooth, explodes for m << 0
+        Squared      the odd one out -- it penalises m > 1 as well, i.e. it
+                     punishes being TOO right, which is why plain MSE on
+                     classification is a mistake.
+
+    That last line is the crisp answer to "why not use MSE for classification".
+    Second reason: MSE composed with a sigmoid is non-convex in the weights and
+    its gradient carries a sigmoid'(z) factor that vanishes when the model is
+    confidently wrong -- the saturation/vanishing-gradient problem log loss
+    avoids by construction.
+
+--------------------------------------------------------------------------------
+5. WEIGHTED AND COST-SENSITIVE LOSSES
+--------------------------------------------------------------------------------
+
+Per-sample weights w_i multiply the loss term. Uses:
+    class weights          w = n / (k * n_class), the standard rebalancing knob
+    cost matrix            different price for FP vs FN (fraud: FN >> FP)
+    importance weighting   correcting for a biased sampling scheme
+    sample quality         down-weight noisy or old records
+
+Reweighting shifts the effective decision threshold. It does not create
+information, and for a well-calibrated model, adjusting the threshold after
+training achieves the same thing more transparently and lets you move the
+operating point without retraining.
+
+--------------------------------------------------------------------------------
+6. PROPER SCORING RULES (why only some losses give probabilities)
+--------------------------------------------------------------------------------
+
+A scoring rule is PROPER if its expected value is minimised by reporting the
+true probability, and STRICTLY proper if that minimiser is unique.
+
+    Log loss (Brier's cousin)   strictly proper
+    Brier score, (p - y)^2      strictly proper
+    Hinge loss                  NOT proper
+    Exponential loss            proper up to the 0.5 factor in the log-odds
+    Accuracy                    not a scoring rule at all -- it is minimised by
+                                any p on the correct side of the threshold
+
+Implication: an SVM's decision_function is a margin, and turning it into a
+probability requires a separate calibration step (Platt scaling). A model
+trained with log loss is at least ASKED to produce probabilities, though
+asking is not the same as succeeding -- regularisation, class weighting and
+boosting all distort the output. See probability_calibration.txt.
+
+--------------------------------------------------------------------------------
+7. LOSS VERSUS METRIC: THE MISMATCH YOU LIVE WITH
+--------------------------------------------------------------------------------
+
+You will be asked "you care about F1, so why do you train with log loss?".
+
+    1. F1, accuracy, precision and recall are all threshold-dependent step
+       functions: zero gradient, so nothing to optimise.
+    2. AUC is a rank statistic over PAIRS, non-decomposable over samples, so
+       mini-batch gradients do not exist in the usual sense.
+    3. The workable recipe: train a strictly proper loss to get good
+       probabilities, then choose the threshold that maximises the metric on a
+       validation split. Never on the test split -- that is leakage
+       (data_leakage.txt).
+    4. If the mismatch is genuinely structural, encode it in the loss as costs
+       or weights rather than trying to differentiate the metric.
+
+Exceptions where the metric IS trainable: pinball loss for quantile targets,
+and pairwise/listwise ranking losses (LambdaRank and friends) that smooth a
+rank metric.
+
+--------------------------------------------------------------------------------
+8. CHOOSING: A DECISION TABLE
+--------------------------------------------------------------------------------
+
+    Situation                                    Loss
+    ------------------------------------------   -------------------------
+    Regression, clean data, want the mean        MSE
+    Regression, heavy tails / outliers           Huber (or MAE)
+    Regression, need an interval or an SLA       Pinball at several tau
+    Regression, multiplicative error, y > 0      MSE on log(y)
+    Binary classification, need probabilities    Log loss
+    Binary, max margin, no probabilities needed  Hinge
+    Multi-class, mutually exclusive              Softmax + cross-entropy
+    Multi-label, independent labels              Per-label binary cross-entropy
+    Extreme imbalance, dense detection           Focal
+    Asymmetric business costs                    Weighted / cost-sensitive loss
+
+--------------------------------------------------------------------------------
+9. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+The loss you minimise determines which statistic of the conditional
+distribution your model estimates: squared error gives the conditional mean,
+absolute error the median, pinball a quantile, log loss the probability. So the
+choice is not a matter of taste, it follows from what the downstream decision
+needs. You cannot train on the metric you care about -- accuracy and F1 have no
+usable gradient -- so you train a convex, classification-calibrated surrogate
+and tune the threshold against the metric afterwards on validation data.
+Robustness follows from how fast the loss grows in the residual: quadratic
+growth means outliers dominate, linear growth bounds their influence, which is
+what Huber and MAE buy you.
+
+--------------------------------------------------------------------------------
+10. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Why not train a classifier with MSE?
+A: Three reasons, in order of importance. First, as a function of the margin
+y*z, squared error penalises predictions that are correct with a large margin,
+which is not what you want. Second, composed with a sigmoid it is non-convex in
+the weights, so you lose the guarantee of a single optimum. Third, its gradient
+carries a sigmoid'(z) factor that goes to zero when the model is confidently
+wrong, so the worst-classified points produce the smallest updates -- log loss
+has gradient (p - y), which is largest exactly when the model is most wrong.
+Follow-up: is MSE on probabilities always wrong? No -- the Brier score is a
+strictly proper scoring rule and is a perfectly good evaluation metric; the
+objection is to using it as a training objective through a saturating link.
+
+Q: MSE or MAE for a house-price model?
+A: It depends which number you are being asked for. MSE estimates the
+conditional mean, MAE the conditional median. House prices are right-skewed
+with genuine mansion outliers, so the two differ materially. If the business
+question is "what is the expected total value of this portfolio", you need
+means, so MSE. If it is "what is a typical price for this kind of house", the
+median is the honest answer and MAE is more robust to the mansions. Huber is
+the usual compromise, and log-transforming the target is often better than
+either since the error is closer to multiplicative than additive.
+
+Q: What does the delta in Huber loss control, and how do you set it?
+A: The residual magnitude at which the loss switches from quadratic to linear,
+so it is the point at which you stop believing a point is signal and start
+treating it as an outlier whose influence should be capped. It has the units of
+the target, so it must be rescaled if you rescale y. Tune it by cross-
+validation, or initialise it at a high quantile of the residuals from a first
+fit -- some implementations do exactly this adaptively per boosting iteration.
+
+Q: Why does hinge loss give you support vectors but log loss does not?
+A: Hinge loss is exactly zero once the margin exceeds 1, so correctly
+classified points outside the margin contribute nothing to the gradient and can
+be deleted from the training set without changing the solution -- the surviving
+points are the support vectors. Log loss is strictly positive everywhere and
+asymptotes to zero without reaching it, so every point exerts some pull forever
+and the solution depends on all of them. That is also why the SVM solution is
+sparse in the data while logistic regression is not.
+
+Q: Your model is trained on log loss but the team is graded on F1 at a fixed
+threshold. What do you do?
+A: Keep training on log loss -- F1 has no gradient and thresholded metrics
+cannot drive optimisation. Then treat the threshold as a hyperparameter: sweep
+it on a validation split, pick the point that maximises F1, and hold out a
+separate test split to report an unbiased number. If the classes are heavily
+imbalanced, also check whether the probabilities are calibrated first, because
+a badly calibrated model can have a good ranking and still put the optimal
+threshold somewhere absurd like 0.03.
+Follow-up: what changes if the cost of a false negative is ten times a false
+positive? Then stop optimising F1, which weights precision and recall equally by
+construction, and minimise expected cost directly.
+
+Q: Why does AdaBoost break on noisy labels when gradient boosting with log loss
+does not, as badly?
+A: Exponential loss grows as exp(-margin), so a mislabelled point, which sits at
+a large negative margin forever, receives exponentially growing weight each
+round and the ensemble spends its capacity chasing it. Log loss grows only
+linearly in the margin for large violations, so a permanently misclassified
+point saturates at a bounded gradient of roughly 1 and cannot hijack training.
+This is the standard argument for preferring the deviance/log-loss objective in
+GBMs on real-world label noise.
+
+Q: What is a proper scoring rule and why should you care?
+A: A scoring rule is proper if a forecaster minimises their expected score by
+reporting their true belief, so it gives no incentive to shade predictions. Log
+loss and the Brier score are strictly proper; hinge loss and accuracy are not.
+It matters whenever the probability itself is the product -- expected-value
+calculations, ranking by risk, thresholding against a cost matrix. If you train
+with a non-proper loss you must calibrate afterwards before treating outputs as
+probabilities.
+
+Q: Can you just add the metric you care about as a penalty term?
+A: Only if it is differentiable almost everywhere and decomposes over samples,
+which most interesting metrics are not. The realistic options are a smooth
+surrogate for the metric (pinball for quantiles, LambdaRank for NDCG), encoding
+the business cost as per-sample weights, or post-hoc threshold and calibration
+tuning. Reaching for a non-differentiable metric inside the objective and then
+optimising it with a gradient method is a red flag in an interview.

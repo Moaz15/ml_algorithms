@@ -1,0 +1,385 @@
+MAXIMUM LIKELIHOOD, MAP, AND BAYESIAN ESTIMATION: THE UNIFYING VIEW
+================================================================================
+
+This is the note that ties the rest of the repo together. Squared error, log
+loss, L2 and L1 penalties, and most of the "why this formula" questions in
+Linear_Regression and Logistic_Regression all fall out of one principle.
+
+--------------------------------------------------------------------------------
+1. THE SETUP
+--------------------------------------------------------------------------------
+
+Assume the data came from a parametric family p(y | x, theta). We have i.i.d.
+observations D = {(x_i, y_i)} and want theta.
+
+Likelihood (a function of theta, NOT a probability distribution over theta):
+
+    L(theta) = p(D | theta) = prod_i p(y_i | x_i, theta)
+
+Probability answers "given theta, how likely is this data". Likelihood answers
+"given this data, how well does each theta explain it". Same expression, read in
+opposite directions. L(theta) does not integrate to 1 over theta, which is
+exactly why you cannot treat it as a distribution without a prior.
+
+Log-likelihood, because products of many small numbers underflow and sums
+differentiate cleanly:
+
+    l(theta) = sum_i log p(y_i | x_i, theta)
+
+    theta_MLE = argmax_theta l(theta) = argmin_theta [ -l(theta) ]
+
+That last equality is the bridge: NEGATIVE LOG-LIKELIHOOD IS A LOSS FUNCTION.
+Every loss in loss_functions.txt that is a proper scoring rule is a negative
+log-likelihood for some noise model.
+
+--------------------------------------------------------------------------------
+2. THE DERIVATIONS WORTH KNOWING COLD
+--------------------------------------------------------------------------------
+
+2.1 Gaussian noise -> squared error (linear regression)
+
+    Assume  y_i = theta^T x_i + e_i ,  e_i ~ N(0, sigma^2)  i.i.d.
+    So      p(y_i | x_i, theta) = (1/sqrt(2*pi*sigma^2)) * exp(-(y_i - theta^T x_i)^2 / (2*sigma^2))
+
+    l(theta) = sum_i [ -0.5*log(2*pi*sigma^2) - (y_i - theta^T x_i)^2 / (2*sigma^2) ]
+             = const - (1/(2*sigma^2)) * sum_i (y_i - theta^T x_i)^2
+
+    Maximising l over theta = minimising sum_i (y_i - theta^T x_i)^2.
+
+    OLS IS MLE UNDER GAUSSIAN NOISE. Nothing else. This is why the Gaussian-
+    errors item sits in Linear_Regression/theory/assumptions.txt: it is not
+    needed for OLS to be the best linear unbiased estimator (Gauss-Markov needs
+    only zero-mean, homoscedastic, uncorrelated errors), but it IS what makes
+    OLS the maximum likelihood estimator and what makes the usual t-tests,
+    F-tests and confidence intervals exact rather than asymptotic.
+
+    Also note sigma^2 dropped out of the argmin. The point estimate does not
+    depend on the noise level; only the uncertainty around it does.
+
+    MLE for the variance itself:
+        d/d(sigma^2) l = 0  =>  sigma^2_MLE = (1/n) * sum_i r_i^2
+    which divides by n, not by (n - p). So the MLE of the variance is BIASED
+    downward; the unbiased estimator is the one with (n - p) in the denominator.
+    A clean example of MLE being consistent but not unbiased.
+
+2.2 Bernoulli -> log loss (logistic regression)
+
+    Assume  y_i | x_i ~ Bernoulli(p_i) ,  p_i = sigmoid(theta^T x_i)
+    Single-observation likelihood, the standard trick for writing a two-case
+    expression as one product:
+
+        p(y_i | x_i) = p_i^{y_i} * (1 - p_i)^{1 - y_i}
+
+    l(theta) = sum_i [ y_i*log(p_i) + (1-y_i)*log(1-p_i) ]
+
+    Negating gives exactly binary cross-entropy. LOG LOSS IS THE BERNOULLI
+    NEGATIVE LOG-LIKELIHOOD. Full gradient and Hessian in
+    Logistic_Regression/theory/BLR_mathematical_derivation.txt; multiclass
+    (categorical / softmax) in the multiclass derivation file.
+
+2.3 Laplace noise -> absolute error
+
+    p(y|x) proportional to exp(-|y - theta^T x| / b)  =>  minimise sum |r_i|.
+    So MAE is the MLE under Laplace (double-exponential) noise, whose heavier
+    tails is precisely why it is robust: large residuals are less surprising
+    under a Laplace model, so they exert less pull.
+
+2.4 Poisson -> Poisson deviance (count targets)
+
+    y | x ~ Poisson(lambda), lambda = exp(theta^T x)
+    -l = sum_i [ exp(theta^T x_i) - y_i * theta^T x_i ] + const
+
+    The log link is not arbitrary; it keeps lambda positive and makes the
+    log-likelihood concave. This is the GLM pattern: pick a distribution from
+    the exponential family, take its canonical link, and the loss writes itself.
+
+2.5 The pattern
+
+    Noise / target model     Negative log-likelihood        Common name
+    ---------------------    ----------------------------   ----------------
+    Gaussian                 squared error                  MSE / OLS
+    Laplace                  absolute error                 MAE
+    Bernoulli                -[y log p + (1-y) log(1-p)]    log loss
+    Categorical              -log p_correct                 cross-entropy
+    Poisson                  exp(z) - y*z                   Poisson deviance
+    Gamma / Tweedie          deviance forms                 insurance losses
+
+    Asked "why squared error?", the senior answer is: because I am assuming
+    additive Gaussian noise, and if that assumption is wrong -- heavy tails,
+    counts, skew -- the loss should change with it.
+
+--------------------------------------------------------------------------------
+3. PROPERTIES OF THE MLE
+--------------------------------------------------------------------------------
+
+Under regularity conditions (correct model, identifiable, interior optimum):
+
+    Consistency          theta_MLE -> theta_true in probability as n -> infinity.
+    Asymptotic normality sqrt(n)(theta_MLE - theta_true) -> N(0, I(theta)^-1)
+                         where I is the Fisher information (per observation).
+    Efficiency           asymptotically attains the Cramer-Rao lower bound: no
+                         consistent estimator has smaller asymptotic variance.
+    Invariance           if theta_MLE maximises the likelihood, then g(theta_MLE)
+                         is the MLE of g(theta), for any function g.
+
+What it does NOT give you:
+
+    Unbiasedness         MLEs are frequently biased in finite samples (see the
+                         sigma^2 example above). Efficiency is asymptotic.
+    Robustness           it is only optimal if the model is right. Under
+                         misspecification it converges to the parameter that
+                         minimises KL divergence to the truth (the
+                         quasi-MLE) -- often still useful, but not "the truth".
+    Existence            the maximum can fail to exist or sit at infinity. See
+                         section 6.
+
+Fisher information, the object behind all of it:
+
+    I(theta) = -E[ d^2 l / d theta^2 ]      (expected negative Hessian)
+
+    High curvature at the optimum = the likelihood falls away sharply = the data
+    pin theta down tightly = low variance. The observed information (the actual
+    Hessian at theta_MLE) is what implementations use, and its inverse diagonal
+    gives the standard errors printed by statsmodels. It is also the matrix in
+    Newton's method, which is why Newton / IRLS is the natural optimiser for
+    GLMs -- the Hessian is a byproduct of the statistics, not an extra cost.
+
+--------------------------------------------------------------------------------
+4. MAP: WHERE REGULARISATION COMES FROM
+--------------------------------------------------------------------------------
+
+Put a prior p(theta) on the parameters. Bayes:
+
+    p(theta | D) = p(D | theta) * p(theta) / p(D)
+
+    theta_MAP = argmax_theta [ log p(D|theta) + log p(theta) ]
+              = argmin_theta [ -l(theta) - log p(theta) ]
+                                            \-------------/
+                                             the penalty term
+
+4.1 Gaussian prior -> L2 / Ridge
+
+    theta_j ~ N(0, tau^2)  =>  log p(theta) = -(1/(2*tau^2)) * ||theta||^2 + c
+
+    Combined with Gaussian noise:
+        minimise  sum_i (y_i - theta^T x_i)^2 + (sigma^2/tau^2) * ||theta||^2
+
+    So lambda = sigma^2 / tau^2. Read that off carefully, it is a genuinely
+    illuminating identity:
+      - lambda large  <=>  tau small  <=>  a tight prior around zero, i.e. a
+        strong prior belief that coefficients are small.
+      - lambda -> 0   <=>  tau -> infinity <=> a flat prior <=> plain MLE/OLS.
+      - lambda also grows with the noise level: noisier data justifies more
+        shrinkage, which matches intuition and matches bias_variance.txt.
+
+4.2 Laplace prior -> L1 / Lasso
+
+    theta_j ~ Laplace(0, b)  =>  log p(theta) = -(1/b) * ||theta||_1 + c
+
+    The Laplace density has a spike at zero and heavier tails than a Gaussian:
+    it says "most coefficients are exactly irrelevant, but a few may be large".
+    That spike is the probabilistic reason L1 produces exact zeros where L2 only
+    shrinks. The geometric argument (corners of the L1 ball) and the soft-
+    thresholding argument are in regularization_concept.txt; this is the third
+    view of the same fact.
+
+    Caveat worth stating: the LASSO estimate is the MAP under a Laplace prior,
+    but the Laplace POSTERIOR MEAN is not sparse. Sparsity is an artefact of
+    taking the mode, not a property of the Bayesian model.
+
+4.3 What MAP loses
+
+    MAP is a point estimate, so it throws away the posterior's shape and gives
+    no uncertainty. It is also NOT invariant to reparameterisation -- the mode
+    of a density moves when you change variables, because the Jacobian
+    reweights the density, while the MLE is invariant. That is a real
+    philosophical wart on MAP and a good interview curveball.
+
+--------------------------------------------------------------------------------
+5. THE FULL BAYESIAN TREATMENT (and why we usually skip it)
+--------------------------------------------------------------------------------
+
+Instead of a point estimate, integrate:
+
+    p(y* | x*, D) = integral p(y* | x*, theta) * p(theta | D) d theta
+
+The posterior predictive averages over every theta weighted by its plausibility,
+which propagates parameter uncertainty into predictions. Predictive intervals
+are then honest rather than conditional-on-a-guess.
+
+    MLE      : argmax p(D | theta)                     no prior
+    MAP      : argmax p(D | theta) * p(theta)          prior, point estimate
+    Bayesian : the whole p(theta | D), then integrate  prior, full uncertainty
+
+As n grows the likelihood dominates any fixed prior, so all three converge --
+which is the formal version of "regularisation matters most when data is
+scarce". Conjugate cases (Gaussian-Gaussian, Beta-Bernoulli) are closed form;
+otherwise you need MCMC or variational inference, and the cost is rarely worth
+it for a large-n prediction problem. It pays off with small n, expensive
+experiments, or when a decision needs a calibrated interval rather than a number.
+
+--------------------------------------------------------------------------------
+6. WHEN MLE BREAKS
+--------------------------------------------------------------------------------
+
+6.1 Perfectly separable logistic regression
+    If a hyperplane separates the classes, scaling theta by any c > 1 strictly
+    increases the likelihood -- p_i -> 1 for every point and l -> 0 from below.
+    The supremum is approached only as ||theta|| -> infinity, so no finite MLE
+    exists. Symptoms: coefficients blowing up over iterations, giant standard
+    errors, non-convergence warnings. Fix: any amount of L2, which supplies a
+    finite MAP where no MLE exists. This is the sharpest practical example of
+    regularisation rescuing estimation rather than merely improving it.
+    Also happens with a rare category that perfectly predicts the outcome.
+
+6.2 Unbounded likelihood in mixtures
+    For a Gaussian mixture, letting one component collapse onto a single point
+    sends its variance to zero and the likelihood to infinity. So the GMM
+    likelihood has no global maximum. Fixes: variance floors, covariance
+    regularisation, or a prior (i.e. MAP-EM). Relevant to Clustering/GMM.
+
+6.3 Latent variables -> EM
+    When some variables are unobserved (cluster assignments, missing labels),
+    the log-likelihood contains a log of a sum and does not separate.
+    Expectation-Maximisation alternates:
+        E step: compute responsibilities, the posterior over the latent
+                variables given the current parameters.
+        M step: maximise the expected complete-data log-likelihood.
+    Each iteration cannot decrease the likelihood, so it converges -- to a local
+    optimum, hence the sensitivity to initialisation shared with k-means. In
+    fact k-means is the limiting case of EM for a GMM with spherical, equal,
+    vanishing covariances and hard assignments. See Clustering/KMeans and
+    Clustering/GMM.
+
+6.4 Misspecification
+    If the true noise is heavy-tailed and you assume Gaussian, MLE happily
+    returns the KL-closest Gaussian model, which can be dragged badly by
+    outliers. The failure is silent. Diagnose with residual plots and QQ plots
+    (Linear_Regression/theory/assumptions.txt), fix by changing the noise model
+    (Huber/Laplace/t) rather than deleting inconvenient rows.
+
+6.5 Small n, many parameters
+    Asymptotic guarantees are asymptotic. With p comparable to n the MLE
+    overfits, standard errors from the Hessian are unreliable, and you should
+    be regularising and cross-validating rather than trusting the theory.
+
+--------------------------------------------------------------------------------
+7. GENERATIVE VS DISCRIMINATIVE, IN LIKELIHOOD TERMS
+--------------------------------------------------------------------------------
+
+    Discriminative  models p(y | x) only. Logistic regression, SVM, trees, nets.
+                    Fewer assumptions, usually lower asymptotic error.
+    Generative      models the joint p(x, y) = p(x | y) * p(y), then applies
+                    Bayes to classify. Naive Bayes, GDA, GMM.
+                    Stronger assumptions, so more bias, but converges faster in
+                    n and can handle missing features and generate samples.
+
+Naive Bayes is MLE on the joint under a conditional-independence assumption;
+logistic regression is MLE on the conditional with no assumption about p(x).
+For the Gaussian case, GDA and logistic regression assume the same functional
+form for p(y|x), so GDA is asymptotically worse if its Gaussian assumption is
+wrong and better if it is right. See Naive_Bayes/concept.txt.
+
+--------------------------------------------------------------------------------
+8. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+Maximum likelihood picks the parameters that make the observed data most
+probable under an assumed noise model, and because we minimise the negative log
+of it, every standard loss function is a likelihood in disguise: Gaussian noise
+gives squared error, Bernoulli gives log loss, Laplace gives absolute error,
+Poisson gives the Poisson deviance. Adding a prior turns MLE into MAP, and the
+prior is the regulariser -- a Gaussian prior is L2 with lambda = sigma^2/tau^2,
+a Laplace prior is L1 and its spike at zero is why L1 gives exact zeros. MLE is
+consistent, asymptotically normal and efficient, but not unbiased in finite
+samples, and it can fail outright -- there is no finite MLE for separable
+logistic regression, which is the cleanest argument for always carrying a little
+L2. Full Bayes goes one step further and integrates over the posterior instead
+of picking a point, which buys honest uncertainty at a computational cost that
+usually only pays off when data is scarce.
+
+--------------------------------------------------------------------------------
+9. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: Derive the squared-error loss from first principles.
+A: Assume y = theta^T x + e with e ~ N(0, sigma^2) i.i.d. The log-likelihood of
+the data is a constant minus (1/(2 sigma^2)) times the sum of squared residuals,
+so maximising the likelihood over theta is identical to minimising the sum of
+squared residuals, and sigma^2 cancels out of the argmin entirely. So least
+squares is not a convention, it is the maximum likelihood estimator under
+additive Gaussian noise -- and if the noise is not Gaussian, that is the signal
+to change the loss.
+
+Q: Likelihood versus probability?
+A: Same function p(D | theta), read along different axes. Fix theta and vary the
+data and it is a probability distribution that integrates to one. Fix the data
+and vary theta and it is a likelihood, which is not a distribution over theta
+and does not integrate to one -- so "the probability that theta equals 0.3" is
+meaningless in a purely likelihood framework. Getting a distribution over theta
+requires a prior, and that is the step from MLE to Bayes.
+
+Q: Is the MLE unbiased?
+A: Not in general. It is consistent and asymptotically unbiased, but the finite-
+sample bias is often non-zero. The standard example is the Gaussian variance:
+the MLE divides the sum of squared residuals by n, whereas the unbiased
+estimator divides by n minus the number of estimated parameters. MLE optimises
+likelihood, not bias, and as bias_variance.txt argues, unbiasedness was never
+the goal anyway -- low expected error is.
+
+Q: Show that L2 regularisation is a Gaussian prior.
+A: Take a zero-mean Gaussian prior on each coefficient with variance tau^2. Its
+log density is minus the squared L2 norm over 2 tau^2, plus a constant. Adding
+that to the Gaussian log-likelihood and negating gives the residual sum of
+squares plus (sigma^2 / tau^2) times the squared L2 norm, so ridge is exactly
+MAP estimation and lambda equals sigma^2 over tau^2. The identity is
+interpretable: a tighter prior or noisier data both mean more shrinkage, and a
+flat prior recovers OLS.
+Follow-up: so what prior gives L1? A Laplace prior -- its density has a spike at
+the origin, which is the probabilistic reason the mode lands exactly on zero for
+weak features.
+
+Q: Why do you not regularise the intercept?
+A: Because the prior story only makes sense for the slopes. Shrinking the
+intercept toward zero encodes a belief that the target's mean is near zero,
+which is an arbitrary statement about the units you happened to measure y in --
+shift y by a constant and the penalty changes the fit. Penalising only the
+slopes keeps the estimator equivariant to shifts in y and to centring of x.
+
+Q: Logistic regression fails to converge and the coefficients keep growing.
+Why?
+A: The classes are almost certainly linearly separable, possibly because of one
+feature or a rare category that perfectly predicts the label -- or because of
+leakage. Under separation the likelihood increases monotonically as you scale
+the weight vector up, so the supremum sits at infinity and no finite MLE exists.
+Add L2, and a finite MAP appears immediately. Before doing that, though, check
+for a leaked feature, because perfect separation on real data is more often a
+pipeline bug than a lucky dataset (data_leakage.txt).
+
+Q: When is a full Bayesian treatment actually worth it over MAP?
+A: When the posterior is wide relative to the effect you care about, so a point
+estimate hides the thing that matters: small n, expensive or few experiments,
+hierarchical structure with little data per group, sequential decisions under
+uncertainty like bandits and Bayesian optimisation, or any setting where a
+calibrated interval is the deliverable. With large n the likelihood swamps the
+prior and the posterior concentrates, so MAP and MLE and the posterior mean all
+agree, and paying for MCMC buys you nothing.
+
+Q: What breaks if your assumed noise distribution is wrong?
+A: MLE does not error out -- it converges to the parameter value minimising KL
+divergence from the truth to your assumed family, the quasi-MLE. Point
+predictions may still be reasonable, but everything downstream that relies on
+the distributional assumption becomes wrong: standard errors, p-values,
+prediction intervals, and any calibration claim. Practically, assuming Gaussian
+noise on heavy-tailed data gives a fit dominated by a handful of extreme points.
+Diagnose with residual and QQ plots; fix by choosing a noise model that matches
+the tails.
+
+Q: How does EM relate to maximum likelihood?
+A: EM is a way to do maximum likelihood when some variables are latent, so the
+log-likelihood contains a log of a sum and cannot be optimised directly. It
+builds a lower bound on the log-likelihood using the posterior over the latent
+variables (E step) and maximises that bound (M step); since the bound touches
+the true objective at the current parameters, each iteration cannot decrease the
+likelihood. It converges to a local optimum only, which is why GMM and k-means
+both need careful initialisation and multiple restarts.

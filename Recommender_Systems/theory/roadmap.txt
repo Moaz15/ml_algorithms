@@ -1,0 +1,3 @@
+Roadmap: Recommender_Systems
+
+TODO: fill in learning plan (concepts to cover, order, scratch implementation targets).

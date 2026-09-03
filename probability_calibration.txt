@@ -1,0 +1,396 @@
+PROBABILITY CALIBRATION: MEASUREMENT, CAUSES, FIXES, AND INTERVIEW Q&A
+================================================================================
+
+--------------------------------------------------------------------------------
+1. WHAT CALIBRATION MEANS
+--------------------------------------------------------------------------------
+
+A model is calibrated if its stated probabilities match observed frequencies:
+
+    P(y = 1 | p_hat = q) = q      for all q in [0, 1]
+
+Plain English: of all the cases where the model said 0.7, about 70% should
+actually be positive. That is it.
+
+Two independent properties of a classifier, and conflating them is the mistake
+this whole note exists to prevent:
+
+    DISCRIMINATION   can the model separate positives from negatives? A
+                     property of the RANKING. Measured by AUC/ROC, PR-AUC,
+                     Gini. Invariant to any monotone transformation of the
+                     scores.
+    CALIBRATION      are the numbers themselves believable as probabilities? A
+                     property of the SCALE. Measured by reliability diagrams,
+                     ECE, the Brier score's reliability term.
+
+They are genuinely independent:
+    - Take a perfectly calibrated model and square its outputs: AUC is
+      unchanged (squaring is monotone), calibration is destroyed.
+    - A model that outputs the base rate 0.05 for everyone is perfectly
+      calibrated and completely useless: AUC 0.5.
+
+So "my AUC is 0.85, so my probabilities are fine" is wrong, and it is a
+frequent interview trap. AUC cannot see calibration by construction.
+
+--------------------------------------------------------------------------------
+2. WHY IT MATTERS (and when it does not)
+--------------------------------------------------------------------------------
+
+Calibration matters whenever the NUMBER is consumed, not just the order:
+
+    Expected-value decisions   expected loss = p * amount. A fraud system that
+                               blocks when p*amount > cost needs p to mean
+                               something. Doubling all probabilities changes
+                               every decision while leaving AUC identical.
+    Cost-sensitive thresholds  the optimal threshold under a cost matrix is
+                               t* = C_fp / (C_fp + C_fn) -- a statement about
+                               probabilities. Meaningless if p is not a
+                               probability.
+    Aggregation                "we expect 340 churners next month" is
+                               sum(p_i). Miscalibration makes forecasts wrong
+                               even when the ranking is perfect.
+    Combining models           stacking, ensembling and any Bayesian
+                               combination weight components by their stated
+                               confidence.
+    Downstream ML              a probability feeding another model or a
+                               bandit/RL policy propagates its distortion.
+    Human trust                telling a doctor "82% chance of malignancy" is a
+                               commitment. Overconfident models erode trust
+                               permanently once clinicians notice.
+
+Calibration does NOT matter much when only the ranking is used and the threshold
+is chosen empirically: top-k retrieval, a fixed review queue capacity, lead
+prioritisation. There, spend your effort on discrimination.
+
+--------------------------------------------------------------------------------
+3. MEASURING IT
+--------------------------------------------------------------------------------
+
+3.1 Reliability diagram (calibration curve) -- always look at this first
+    Bin predictions (equal-width, or equal-count/quantile bins which are better
+    behaved under imbalance). Plot mean predicted probability per bin on x
+    against observed positive fraction on y. Perfect calibration is the
+    diagonal.
+
+    Reading the shapes:
+        below the diagonal   over-confident (predicts higher than reality)
+        above the diagonal   under-confident
+        sigmoid shape        classic over-confidence at both extremes; typical
+                             of boosted trees and SVMs pushed toward 0 and 1
+        inverse-sigmoid      predictions bunched toward the middle; typical of
+                             bagged models and heavily regularised models
+    Always plot the histogram of predictions underneath. A bin containing 4
+    points is noise, and equal-width bins under imbalance leave most bins nearly
+    empty while 95% of the mass sits in the first bin.
+
+3.2 Expected Calibration Error (ECE)
+    ECE = sum_b (n_b / n) * | acc(b) - conf(b) |
+    A single number, and a fragile one: it depends on the binning scheme and the
+    number of bins, is biased downward with few bins, and can be gamed. Report
+    it with the bin count and scheme, and never rely on it alone. MCE (the max
+    over bins) is even noisier.
+
+3.3 Brier score and its decomposition
+    Brier = (1/n) * sum (p_i - y_i)^2 -- a strictly proper scoring rule
+    (loss_functions.txt section 6), so it rewards honest probabilities.
+
+    Murphy decomposition:
+        Brier = reliability - resolution + uncertainty
+            reliability   calibration error   (lower better)
+            resolution    how much predictions vary across outcomes
+                          (higher better -- this is discrimination)
+            uncertainty   base-rate variance p*(1-p) -- irreducible
+    This is the clean way to say that a proper score measures BOTH properties at
+    once, and why a good Brier score cannot distinguish "well calibrated but
+    uninformative" from "informative but miscalibrated" unless you decompose it.
+
+3.4 Log loss
+    Also strictly proper, and far more sensitive to confident mistakes than
+    Brier because it is unbounded. Good for optimisation, harsh as a diagnostic:
+    a single p = 0.001 on a positive can dominate the average.
+
+3.5 Calibration slope and intercept
+    Regress the true labels on the logits: fit logistic regression of y on
+    logit(p_hat), giving y ~ sigmoid(a + b*logit(p_hat)).
+        b = 1, a = 0   calibrated
+        b < 1          over-confident (spread too wide) -- the usual case
+        b > 1          under-confident
+        a != 0         base-rate shift / systematic bias
+    Two interpretable numbers, no binning required. Underused; the clinical
+    prediction literature treats this as the standard report.
+
+--------------------------------------------------------------------------------
+4. WHO IS MISCALIBRATED, AND WHY
+--------------------------------------------------------------------------------
+
+    Model                    Typical pattern       Mechanism
+    ----------------------   -------------------   -------------------------
+    Logistic regression      well calibrated       trained on a strictly proper
+    (unregularised, correct                        loss whose minimiser IS the
+     link, no resampling)                          probability; the fitted
+                                                   score-equations force the
+                                                   predicted positives to match
+                                                   the observed count
+    Logistic regression      shrunk toward base    the penalty biases weights
+    (strong L1/L2)           rate (under-conf.)    toward zero
+    Naive Bayes              extreme, near 0/1     conditional-independence
+                                                   assumption double-counts
+                                                   correlated evidence, so
+                                                   log-odds pile up
+    SVM                      sigmoid distortion    hinge loss is not a proper
+                                                   scoring rule; the output is
+                                                   a margin, not a probability
+    Boosted trees            over-confident,       the objective keeps pushing
+    (AdaBoost, GBM)          pushed to extremes    margins outward past the
+                                                   point of correct classification
+    Random forest            under-confident,      averaging many trees pulls
+                             pulled to the middle  extremes toward the mean; a
+                                                   vote fraction is not a
+                                                   probability, though it is
+                                                   often closer than most
+    Deep networks            strongly over-conf.   capacity to drive training
+                                                   NLL to zero; modern nets fit
+                                                   labels perfectly and keep
+                                                   sharpening confidence
+    Any model + resampling   base-rate shifted     see section 6
+    or class weights
+
+Key asymmetry worth stating: logistic regression is calibrated because of the
+loss it minimises, not because it is linear. Any model trained to convergence on
+log loss without regularisation, resampling, or capacity to memorise has a
+reason to be calibrated on its training distribution -- and each of those three
+caveats is exactly what breaks it in practice.
+
+--------------------------------------------------------------------------------
+5. THE FIXES
+--------------------------------------------------------------------------------
+
+All post-hoc methods learn a map g: score -> probability on data the model did
+NOT train on. Fitting a calibrator on training predictions calibrates the
+memorised scores and does nothing for new data -- that is leakage
+(data_leakage.txt).
+
+5.1 Platt scaling (sigmoid calibration)
+    Fit a one-dimensional logistic regression on the scores:
+        p = sigmoid(a * s + b)              two parameters, fitted by MLE
+    - Parametric, so it works with a few hundred calibration points.
+    - Strictly monotone, so the ranking and therefore AUC are exactly preserved.
+    - Assumes the distortion has a sigmoid shape, which is a good match for
+      SVMs and boosted trees and a bad match for arbitrary shapes.
+    - Platt's original recipe also regularises the targets slightly (using
+      (N+1)/(N+2) instead of 1) to avoid infinite parameters under separation.
+    - Beta calibration is a three-parameter generalisation that fixes the
+      sigmoid's inability to be identity-shaped near the boundaries.
+
+5.2 Isotonic regression
+    Fit the best non-decreasing step function mapping score to probability
+    (pool-adjacent-violators algorithm).
+    - Non-parametric: can correct any monotone distortion, including shapes a
+      sigmoid cannot express.
+    - Needs much more data -- roughly a thousand-plus calibration points, more
+      under imbalance -- and overfits happily on less.
+    - Piecewise constant, so it creates ties. That flattens the ranking within
+      each step and CAN slightly reduce AUC, unlike Platt.
+    - Cannot extrapolate: it clamps outside the observed score range, and it
+      will happily output exactly 0 or 1, which is fatal under log loss. Clip.
+
+5.3 Temperature scaling (the deep-learning default)
+    Divide the logits by a single scalar T > 0 before the softmax:
+        p = softmax(z / T)
+    Fit T on a validation set by minimising NLL. T > 1 softens.
+    - One parameter, so it barely overfits.
+    - The softmax argmax is unchanged, so accuracy is EXACTLY preserved -- the
+      property that made it the standard choice for neural networks.
+    - It cannot fix class-specific or input-dependent miscalibration, since it
+      applies one global scale. Vector/matrix scaling and Dirichlet calibration
+      relax that at the cost of more parameters.
+
+5.4 Choosing
+
+    Situation                                  Method
+    ----------------------------------------   --------------------------
+    Small calibration set (< ~1000)            Platt / beta
+    Large calibration set, unknown shape       Isotonic
+    Neural network, multiclass                 Temperature scaling
+    Must not change accuracy at all            Temperature scaling
+    Must not change ranking at all             Platt (strictly monotone)
+    Multiclass, non-neural                     one-vs-rest then renormalise,
+                                               or Dirichlet calibration
+
+5.5 Where the calibration data comes from
+    - Dedicated hold-out: simple, but the calibrator is fitted on less data and
+      the model on less than the full set.
+    - Cross-validated calibration (what sklearn's CalibratedClassifierCV does
+      with cv=k): out-of-fold predictions calibrate, and the result is an
+      ensemble of k calibrated models. Uses all the data, costs k fits.
+    - Out-of-fold predictions you already have from cross_validation.txt are
+      exactly the right input, and free if you kept them.
+
+5.6 A note on fixing it at the source
+    Post-hoc calibration treats a symptom. Sometimes the cause is fixable:
+    reduce regularisation, stop resampling and use a threshold instead, add
+    label smoothing or weight decay for a network, use log loss rather than
+    exponential loss for boosting, or reconsider naive Bayes' independence
+    assumption. Post-hoc is usually cheaper and more reliable, but it is worth
+    knowing which knob created the problem.
+
+--------------------------------------------------------------------------------
+6. IMBALANCE, RESAMPLING, AND PRIOR CORRECTION
+--------------------------------------------------------------------------------
+
+If you train on a resampled set, the model learns the RESAMPLED base rate, so
+every probability is systematically inflated. Undersample negatives 100:1 and a
+true 1% risk comes out near 50%. Ranking is unaffected; the scale is wrong.
+
+Correct analytically, given the training prior pi_train and the true prior
+pi_true (equivalently, adjust the intercept of a logistic model):
+
+    odds_corrected = odds_model * (pi_true / (1 - pi_true)) * ((1 - pi_train) / pi_train)
+
+    p_corrected = odds_corrected / (1 + odds_corrected)
+
+Class weights cause the same shift for the same reason. The cleanest practical
+policy: do not resample or reweight at all, train on the natural distribution
+with a proper loss, and move the decision THRESHOLD to reflect costs. You keep
+calibration for free and you can change the operating point without retraining.
+See handling_imbalanced_data.txt.
+
+Also, under heavy imbalance the reliability diagram needs quantile bins and a
+log-scaled x axis, otherwise everything interesting is compressed into the
+leftmost bin.
+
+--------------------------------------------------------------------------------
+7. CALIBRATION IN PRODUCTION
+--------------------------------------------------------------------------------
+
+Calibration is a property of a model AND a distribution, so it decays under
+drift even when discrimination holds up. A model whose AUC is stable but whose
+predicted positive count has drifted away from the observed count is telling you
+the base rate moved (prior shift), which is the cheapest kind of drift to fix:
+recalibrate, do not retrain.
+
+Monitor, on a rolling window:
+    mean predicted probability versus observed positive rate
+    calibration slope and intercept
+    ECE with a fixed binning scheme so the numbers are comparable over time
+    the prediction histogram
+
+Watch out for a feedback trap: if the model's decisions change who gets labelled
+(blocked transactions never produce a chargeback, rejected loans never default),
+the observed rate is censored and naive recalibration bakes in the policy.
+See ML_Lifecycle/theory/12_monitoring_and_drift.txt.
+
+--------------------------------------------------------------------------------
+8. THE THIRTY-SECOND ANSWER
+--------------------------------------------------------------------------------
+
+A model is calibrated when things it calls 70% likely happen about 70% of the
+time. It is a property of the scale of the scores, entirely separate from
+discrimination, which is a property of their ranking -- so AUC is blind to
+calibration by construction, since any monotone transformation leaves it
+unchanged. It matters whenever the number is consumed rather than just ordered:
+expected-value decisions, cost-based thresholds, forecast totals, stacking. You
+diagnose it with a reliability diagram plus the calibration slope, and summarise
+with a proper score like Brier, whose reliability term isolates the calibration
+part. Logistic regression is calibrated because log loss is a strictly proper
+scoring rule; SVMs are not, because hinge loss is not proper; boosted trees and
+deep networks are over-confident; bagged models are under-confident; and any
+resampling or class weighting shifts the base rate. The fixes are post-hoc maps
+fitted on held-out data: Platt scaling for small samples and exact rank
+preservation, isotonic for large samples and arbitrary monotone distortions,
+temperature scaling for neural networks because it preserves accuracy exactly.
+
+--------------------------------------------------------------------------------
+9. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+
+Q: My model has 0.92 AUC. Are the probabilities trustworthy?
+A: AUC says nothing about it. AUC depends only on the ordering of the scores, so
+it is invariant to any monotone transformation -- I can square every probability
+or pass them through any increasing function and AUC will not move, while
+calibration is destroyed. To answer the question I would plot a reliability
+diagram with quantile bins, fit the calibration slope and intercept by
+regressing the labels on the logits, and check whether the sum of predicted
+probabilities matches the observed positive count. A high AUC with a calibration
+slope of 0.6 is a common and perfectly consistent result.
+
+Q: Why is logistic regression usually calibrated while an SVM is not?
+A: Logistic regression is fitted by maximising the Bernoulli likelihood, and log
+loss is a strictly proper scoring rule, so its population minimiser is the true
+conditional probability -- the model is being asked for a probability and
+optimally answers with one. In fact the score equations force the sum of
+predicted probabilities to equal the observed count of positives, so it is
+calibrated in-sample by construction. An SVM minimises hinge loss, which is not
+proper and is exactly zero for any point beyond the margin, so the output is a
+distance from a boundary with no probabilistic meaning; turning it into a
+probability requires a separate calibration step, which is what Platt scaling
+was invented for.
+Follow-up: what breaks logistic regression's calibration? Strong regularisation,
+resampling or class weights, and a misspecified link or missing interactions.
+
+Q: Platt scaling or isotonic regression?
+A: Data size and the shape of the distortion. Platt fits two parameters, so it
+works on a few hundred calibration points and is strictly monotone, meaning the
+ranking and AUC are exactly preserved -- but it can only express a sigmoid, so
+it will not fix an odd-shaped curve. Isotonic is non-parametric and fits any
+monotone distortion, but it needs on the order of a thousand or more points,
+overfits below that, and produces a step function that creates ties and can
+therefore nudge AUC down slightly. It also clamps at the ends and can emit exact
+zeros and ones, which is fatal under log loss, so I clip. For neural networks I
+would use temperature scaling instead, since one parameter suffices and accuracy
+is provably untouched.
+
+Q: Where do you get the data to fit the calibrator?
+A: Never from the training predictions -- the model has memorised those to some
+degree, so the calibrator would learn to correct a distortion that does not
+exist on fresh data, and the result is worse than doing nothing. Either hold out
+a dedicated calibration split, or use cross-validated calibration where
+out-of-fold predictions fit the calibrator, which uses all the data at the cost
+of k fits. If I already ran cross-validation, the stored out-of-fold predictions
+are exactly the right input and cost nothing extra.
+
+Q: You undersampled negatives 50:1 to train. Your model says 0.6 for a case you
+believe is roughly 2% risk. Explain and fix.
+A: The model learned the resampled base rate, not the real one, so every
+probability is inflated while the ranking is untouched. The fix is a prior
+correction on the odds: multiply the model's odds by the true prior odds and
+divide by the training prior odds, then convert back to a probability -- for a
+logistic model this is just an intercept shift. Better still, I would question
+the undersampling: training on the natural distribution with log loss and then
+moving the decision threshold gets the same operating flexibility while keeping
+calibration for free, and it lets me change the threshold without retraining.
+
+Q: Random forests and gradient boosting are both tree ensembles. Why do they
+miscalibrate in opposite directions?
+A: Because of how the ensemble is formed. A random forest averages many
+independently grown trees; averaging pulls values toward the middle, so the
+extremes get compressed and the model is under-confident -- a vote fraction of
+0.9 typically corresponds to a higher true rate than 0.9. Gradient boosting
+fits stages sequentially to reduce a margin-based loss, which keeps pushing
+scores away from the boundary even after the points are correctly classified, so
+predictions pile up near 0 and 1 and the model is over-confident. That opposite
+distortion is visible as an inverse-sigmoid reliability curve for the forest and
+a sigmoid one for the boosted model.
+
+Q: Does calibration improve accuracy?
+A: Not by itself, and this is worth being precise about. Platt scaling and
+temperature scaling are monotone, so the ranking is unchanged and accuracy at a
+FIXED probability threshold like 0.5 can change only because the numbers moved
+across that threshold -- which is a real and often large improvement in
+practice, but it comes from relocating the operating point, not from better
+discrimination. If instead you had already tuned the threshold optimally on the
+raw scores, calibration cannot improve accuracy at all. What it improves is
+every decision that depends on the value of p: expected-cost decisions, volume
+forecasts, and downstream models.
+
+Q: Your model's AUC is flat over three months but the predicted positive rate
+has drifted from 3% to 7% while the observed rate stayed at 3%. Diagnosis?
+A: Stable discrimination with broken calibration -- the ranking still works, so
+the features have not lost their relationship to the target, but the scale has
+shifted. The usual cause is covariate shift moving the feature distribution
+without changing the conditional relationship, or an upstream pipeline change
+altering a feature's units or null rate. Since the observed rate is unchanged,
+this is not a genuine base-rate move. I would recalibrate on recent labelled
+data rather than retrain, verify feature distributions against the training
+window to find the upstream change, and check that label collection has not
+become censored by the model's own decisions.
