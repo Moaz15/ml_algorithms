@@ -1,0 +1,234 @@
+ASSUMPTIONS OF LOGISTIC REGRESSION
+==================================
+WHAT AN "ASSUMPTION" MEANS HERE
+--------------------------------------------------------------------------------
+You have fitted a churn model. It returns coefficients, probabilities and
+p-values, and it will return them whether or not it had any business being used
+on your data — nothing throws an error.
+
+An assumption is a condition that has to hold for those outputs to mean what you
+think they mean. Break one and the model still runs; it just quietly lies about
+something. The six below are ordered the way you meet them: what you are
+predicting, what the model claims, what your rows are, how your features relate,
+how much data you have, and which points dominate the fit.
+
+
+1. THE OUTCOME MUST BE DISCRETE
+--------------------------------------------------------------------------------
+The first question is whether this is even a classification problem.
+
+    "Will this user play any episode next week?"    -> yes/no, a class
+    "How many episodes will they play?"             -> a count, not a class
+
+The assumption: y is binary (0/1), or categorical for the multinomial and
+ordinal extensions.
+
+Why: the model maximizes the Bernoulli likelihood, P(y|x) = ŷ^y (1-ŷ)^(1-y),
+which is only defined for y in {0,1}. Hand it y = 7.3 and the log-likelihood
+stops being a meaningful quantity. Hand it y = 0.6 (a soft label) and it still
+computes, but you are fitting a probability to a probability, not classifying.
+
+Counts belong to Poisson regression, continuous targets to linear regression.
+
+Once you know it is classification, pick the right variant:
+
+    2 classes             binary logistic
+    3+ unordered          multinomial / softmax
+                          (genre: drama, crime, comedy)
+    3+ ordered            ordinal logistic, which preserves the ranking
+                          (rating: low, medium, high)
+
+2. THE LOGIT MUST BE LINEAR IN THE PREDICTORS
+--------------------------------------------------------------------------------
+Now the model's actual claim. Suppose churn rises with user age among
+teenagers, falls through middle age, then rises again among retirees — a U
+shape.
+
+The model fits ONE coefficient for age. It averages the rising and falling
+halves to roughly zero and reports that age does not matter, while
+misclassifying both ends. No amount of data fixes it.
+
+The assumption:
+
+    ln( p / (1-p) ) = β₀ + β₁x₁ + ... + βₙxₙ
+
+Note carefully what it does NOT say. It does not say p is linear in x — that
+relationship is always an S-curve. It says the LOG-ODDS move at a constant rate
+per unit of x. This is a much weaker claim, and stating it as "linear
+relationship with the target" is the most common way to get this wrong.
+
+How to spot it:
+  - Binned logit plot: split a continuous feature into deciles, compute the
+    empirical log-odds in each bin, plot against the bin midpoints. Straight is
+    fine; curved is not. Easiest and most direct.
+  - Box-Tidwell test: add an x·ln(x) term. A significant coefficient means the
+    logit is not linear in that feature.
+  - Residuals plotted against each continuous feature.
+
+How to fix it: add a quadratic term or an interaction; log or square-root
+transform the feature; bin it into buckets (handles any shape, loses
+information); or use splines / a GAM.
+
+Worth knowing why you would fix this rather than switch to XGBoost: logistic
+regression serves in microseconds (one dot product), scales to billions of
+sparse features with online learning, and stays interpretable enough for
+regulatory sign-off. In ad ranking and credit scoring those often outrank a
+point of AUC.
+
+
+3. THE OBSERVATIONS MUST BE INDEPENDENT
+--------------------------------------------------------------------------------
+Next, what a row actually is. Compare two datasets of 100 rows:
+
+    100 events from 100 different users   -> 100 independent pieces of evidence
+    100 events from 5 power users         -> 5 people's habits, counted 20x each
+
+The second looks like 100 rows to the model. It is not.
+
+The assumption: each row is a separate draw, and one row's outcome tells you
+nothing about another's beyond what the features already say.
+
+What breaks: the COEFFICIENTS come out roughly right, but the standard errors
+are far too small. That inflates z-scores, shrinks p-values, and makes you
+declare features significant when they are not — Type I errors. Your model is
+fine; your confidence in it is not.
+
+Common violations: repeated measures on the same user; users clustered by
+region, device or cohort; anything time-ordered, where today's state depends on
+yesterday's.
+
+How to spot it: ask what one row represents, which catches most cases. Then
+intraclass correlation for grouped data, or Durbin-Watson for time-ordered data.
+
+How to fix it: aggregate to one row per user; use cluster-robust standard errors
+(corrects the p-values, leaves coefficients alone); or fit a mixed-effects model
+(GLMM) with a random intercept per group.
+
+
+4. NO PERFECT MULTICOLLINEARITY
+--------------------------------------------------------------------------------
+Now how the features relate to EACH OTHER. Put both "total listening minutes"
+and "average minutes per session" into the churn model. They move together, so
+when churn drops, the fit cannot tell which one deserves the credit. It splits
+it arbitrarily — and splits it differently every time you refit.
+
+The assumption: no feature is an exact linear combination of the others. Strong
+correlation short of exact is a quality problem rather than a violation, but it
+causes most of the practical damage.
+
+Why it hurts, in one formula:
+
+    Cov(β̂) = (XᵀWX)⁻¹ ,     W = diag( pᵢ(1 - pᵢ) )
+
+Note the W, which linear regression does not have. Each row is weighted by how
+uncertain the model is about it: points near p = 0.5 carry almost all the
+information, points it is already sure about contribute almost nothing. When
+features are collinear, XᵀWX approaches singular and these variances explode.
+
+What breaks: coefficients swing wildly between refits, sometimes with signs that
+make no sense; standard errors balloon; features that obviously matter come out
+insignificant. Predictions are largely unaffected — this damages interpretation,
+not accuracy.
+
+How to spot it: correlation matrix for a quick look, then VIF (above 5, strictly
+above 10, is a flag).
+
+How to fix it: drop or merge the redundant feature; L2 regularization, which
+adds λI before inversion and forces invertibility; or PCA on the correlated
+block.
+
+
+5. ENOUGH DATA, AND ENOUGH OF THE RARE CLASS
+--------------------------------------------------------------------------------
+Now sample size — and the count that matters is not rows.
+
+    50,000 rows, 20 features, fraud is 0.2% of them
+    -> 100 fraud cases for 20 features
+    -> 5 events per variable
+
+Fifty thousand rows sounds ample. Five examples per coefficient is not.
+
+The assumption: enough observations of the RARE class relative to the number of
+parameters. Rule of thumb: at least 10 events per variable (EPV), ideally 15.
+
+The specific failure mode is PERFECT SEPARATION, and it is worth understanding
+because it looks like a bug. Suppose one sparse feature happens to be 1 for
+every fraud case and 0 for everything else. The likelihood is then maximized by
+driving that coefficient toward infinity, because a perfect step beats every
+finite S-curve. The optimizer never converges.
+
+What breaks: coefficients in the hundreds, enormous standard errors, convergence
+warnings, and a training loss that keeps falling toward zero. It is most likely
+with small samples, rare classes, and high-cardinality categorical features.
+
+How to fix it: L1 or L2 regularization, which makes infinite weights infinitely
+expensive; Firth's penalized likelihood; or merging the offending category. See
+regularization.txt.
+
+
+6. NO SINGLE POINT SHOULD DOMINATE THE FIT
+--------------------------------------------------------------------------------
+Finally, individual rows. A data-entry error records a user's tenure as 9999
+months. Its log-odds are extreme, and if its label disagrees with the model, the
+loss from that one row dominates the gradient and drags the boundary toward it.
+
+The reason is that cross-entropy is unbounded on the wrong side: a confidently
+wrong prediction costs -log(tiny), which is enormous.
+
+The nuance that matters: an extreme feature value with a CONSISTENT label is
+mostly harmless. The model is already confident there, and the gradient p(1-p)
+is tiny. The damage comes from an extreme value with a SURPRISING label — that
+is influence, not leverage alone.
+
+How to spot it: Cook's distance, hat values (leverage), standardized Pearson or
+deviance residuals.
+
+How to fix it: investigate first, since many such points are data errors. Then
+winsorize at the 99th percentile, log-scale heavy-tailed features, or
+regularize.
+
+
+NOW THE USEFUL PART: WHAT IS NOT ON THE LIST
+--------------------------------------------------------------------------------
+With all six in hand, the comparison is worth making. Logistic regression
+assumes far less than people expect, and candidates routinely recite linear
+regression's list by mistake.
+
+NOT assumed:
+  - Normally distributed features. There is no distributional assumption on X.
+  - Normally distributed errors. The errors are Bernoulli by construction.
+  - Homoscedasticity. The variance IS p(1-p), so it changes with the prediction
+    by design — largest at p = 0.5, smallest near 0 and 1.
+  - A linear relationship between the features and y. The linearity is with the
+    log-odds (assumption 2), which is a far weaker claim.
+
+The reason: those extra conditions exist in linear regression to justify least
+squares and its standard errors. Logistic regression is fitted by maximum
+likelihood on a Bernoulli model, which brings its own variance structure.
+
+
+HOW BADLY DOES EACH ONE HURT
+--------------------------------------------------------------------------------
+Not equally, and knowing the ranking is worth more than knowing the list.
+
+    1 and 2 broken  ->  the model is MIS-SPECIFIED. Coefficients are biased,
+                        predictions systematically wrong. Worst case.
+    3 broken        ->  coefficients are roughly fine; STANDARD ERRORS are too
+                        small, so p-values lie. Predictions are usable.
+    4, 5, 6 broken  ->  coefficients are unstable or diverge; predictions are
+                        often still acceptable.
+
+The practical read: if you only need to rank users, violations of 3 to 6 may not
+matter much. If you need to report what a feature does, they matter enormously.
+
+
+SUMMARY
+--------------------------------------------------------------------------------
+Assumption              Breaks             Detection           Fix
+----------------------  -----------------  ------------------  ----------------
+1 Discrete outcome      Wrong model        Check the target    Right variant
+2 Linear logit          BIAS               Binned logit plot   Transform, spline
+3 Independence          Standard errors    ICC; what is a row  Cluster SEs, GLMM
+4 No multicollinearity  Unstable coefs     VIF > 5             Drop, L2, PCA
+5 Enough events (EPV)   Divergence         EPV < 10            L1/L2, Firth
+6 No dominant points    Boundary shifts    Cook's distance     Winsorize, L2

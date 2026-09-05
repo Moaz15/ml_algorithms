@@ -1,0 +1,203 @@
+LOGISTIC REGRESSION — CONCEPT & INTUITION
+=========================================
+Math: mathematical_derivation_binary.txt.
+Coefficient reading: odds_and_logit.txt.
+Running example: will this subscriber CHURN next month (1) or not (0)?
+
+
+1. THE TARGET IS A PROBABILITY, NOT A LABEL
+--------------------------------------------------------------------------------
+Two subscribers look identical on every feature we have — same plan, same
+listening hours, same tenure. One churns, one does not. Nothing is wrong with
+the data: whatever decided it (a bad week, a competitor's offer) is not in our
+table.
+
+So "will this user churn" has no correct yes/no answer. What does have an answer
+is how OFTEN users like this churn:
+
+    ŷ = P(y = 1 | x)
+
+That is the honest target, and it is more useful than a label anyway. "18%
+likely to churn" lets you rank users, size a retention budget, and set a
+cutoff. "Will churn" throws all of that away before you can use it.
+
+The label comes later, and only when a decision forces it (section 6).
+
+
+2. WHY NOT JUST RUN LINEAR REGRESSION ON THE 0/1 COLUMN
+--------------------------------------------------------------------------------
+The obvious move is to treat churn as a number and fit a line. It fails three
+ways, and each one points at what logistic regression has to fix.
+
+  a) It predicts impossible numbers. A line is unbounded, so a heavy user with
+     long tenure gets P = -0.3 and a brand-new trial user gets P = 1.4. Not
+     probabilities, and nothing about least squares prevents it.
+
+  b) The loss punishes the wrong thing. Squared error treats "0.9 for a
+     churner" and "1.1 for a churner" as equally wrong — but the second is not
+     wrong at all, it is just impossible. Meanwhile it barely penalizes
+     confident, wrong predictions, which are the expensive ones.
+
+  c) The straight-line shape is wrong. One extra week of inactivity matters
+     hugely for a borderline user and almost not at all for someone already
+     certain to leave. Probability must FLATTEN near 0 and 1 — it cannot keep
+     climbing, and a line cannot flatten.
+
+Three requirements fall out: output bounded in (0,1), an S-shape that saturates
+at both ends, and a loss that matches probabilities.
+
+
+3. THE FIX: KEEP THE LINEAR SCORE, SQUASH IT
+--------------------------------------------------------------------------------
+We do not throw the linear part away — it is what makes the model fast and
+interpretable. We compute the same weighted sum:
+
+    z = θᵀx + b        an unbounded "evidence score" for churn
+
+and then pass it through a function that squashes ℝ into (0,1):
+
+    ŷ = sigmoid(z) = 1 / (1 + e^(-z))
+
+Why this function specifically:
+
+    Range        maps (-inf, +inf) into (0, 1), so the output is always a valid
+                 probability
+    S-shape      saturates at both ends, which is exactly the flattening from
+                 2(c): once a user is clearly gone, more evidence changes little
+    Monotone     more evidence never lowers the probability
+    Smooth       differentiable everywhere, so gradient descent works
+    z = 0 -> 0.5 the natural "no evidence either way" midpoint
+
+Read the three regions and the whole model becomes intuitive:
+
+    z very negative -> ŷ ≈ 0     confident: will not churn
+    z = 0           -> ŷ = 0.5   maximally uncertain
+    z very positive -> ŷ ≈ 1     confident: will churn
+
+
+4. WHAT THE MODEL IS ACTUALLY CLAIMING
+--------------------------------------------------------------------------------
+Invert the sigmoid and the assumption becomes visible:
+
+    log( p / (1-p) ) = θᵀx + b
+
+The model is LINEAR IN THE LOG-ODDS, not in the probability. That single line
+explains most of its behaviour:
+
+  - Coefficients are constant on the log-odds scale, never on the probability
+    scale. One extra week of inactivity adds the same amount to z always — but
+    that is worth +0.20 probability for a borderline user and +0.01 for one
+    already at 0.98.
+  - "Linearity" as an assumption means linear in the LOGIT, not a straight-line
+    relationship with churn itself (assumptions.txt section 2).
+
+The full reading of coefficients, odds and odds ratios lives in
+odds_and_logit.txt.
+
+
+5. WHY THE DECISION BOUNDARY IS STILL A STRAIGHT LINE
+--------------------------------------------------------------------------------
+The sigmoid is curved, so people expect a curved boundary. It is not.
+
+Predicting churn at ŷ ≥ 0.5 means sigmoid(z) ≥ 0.5, which happens exactly when
+z ≥ 0. So the boundary is:
+
+    θᵀx + b = 0
+
+— a straight line in 2D, a plane in 3D, a hyperplane in general. The sigmoid
+bends the PROBABILITIES, not the SPACE. It decides how fast confidence grows as
+you move away from the boundary, not where the boundary sits.
+
+So logistic regression is a LINEAR CLASSIFIER. If churners and non-churners
+cannot be separated by a straight line, no amount of data will help — you need
+engineered features (interactions, polynomial terms) or a different model.
+
+
+6. PROBABILITY VS LABEL: 0.5 IS NOT A LAW
+--------------------------------------------------------------------------------
+The model outputs a probability. Turning it into an action needs a threshold,
+and
+0.5 is only the default — it assumes a false positive and a false negative cost
+the same. They almost never do.
+
+    Churn: a false positive sends a ₹50 retention coupon to someone who was
+    staying anyway. A false negative loses a ₹3,000/year subscriber. The
+    asymmetry is 60:1, so catch more churners — threshold near 0.15.
+
+    Fraud blocking: a false positive freezes a legitimate customer's card at a
+    checkout counter. Now false positives are expensive too, and the threshold
+    moves back up.
+
+The threshold is a business decision made AFTER training, and moving it does not
+require refitting. This is also why a well-calibrated probability is worth more
+than a label: it can serve many decisions at many cutoffs.
+
+Related: accuracy at a fixed 0.5 is a poor way to judge such a model — see
+evaluation_metrics.txt.
+
+
+7. HOW IT LEARNS, IN ONE PARAGRAPH
+--------------------------------------------------------------------------------
+We pick the parameters that make the labels we actually saw as likely as
+possible — maximum likelihood. Taking the log turns that product into a sum and
+gives binary cross-entropy, which punishes confident wrong answers brutally
+(predicting 0.99 for a non-churner costs far more than predicting 0.6).
+
+Unlike linear regression there is no closed-form solution, so we walk downhill
+with gradient descent. The loss is convex, so there is one global minimum and
+no local traps. Full derivation: mathematical_derivation_binary.txt.
+
+
+8. STRENGTHS AND WEAKNESSES
+--------------------------------------------------------------------------------
+Strengths
+  - Outputs genuine, usually well-calibrated probabilities, not just labels
+  - Interpretable: each coefficient is a stated effect on the log-odds
+  - Fast to train and to serve; scales to very wide, sparse data (text)
+  - Convex, so training is reliable and reproducible
+  - A strong baseline that often loses to a boosted forest by only a point or
+  two
+
+Weaknesses
+  - Linear boundary; curvature must be hand-engineered
+  - Assumes additive effects — interactions must be supplied explicitly
+  - Sensitive to outliers and to perfect separation (coefficients run to
+    infinity, which regularization.txt fixes)
+  - Needs care under heavy class imbalance
+  - Cannot handle missing values on its own
+
+
+9. HOW IT COMPARES
+--------------------------------------------------------------------------------
+    vs LINEAR REGRESSION   Same linear score. Different output (probability vs
+                           number), loss (cross-entropy vs squared error), and
+                           solution method (iterative vs closed form).
+
+    vs SVM                 Both draw a linear boundary. SVM maximizes the margin
+                           and cares only about points near it; logistic uses
+                           every point and returns a probability. Want a
+                           probability, use logistic; want the widest
+                           separation, use SVM.
+
+    vs NAIVE BAYES         Discriminative vs generative. Logistic models
+                           P(y|x) directly; Naive Bayes models how the features
+                           are generated and applies Bayes' rule. NB wins on
+                           tiny datasets, logistic wins as data grows because
+                           it makes no independence assumption.
+
+    vs DECISION TREES      Global straight boundary vs local axis-aligned boxes.
+                           Trees capture interactions and curvature for free but
+                           give coarse probabilities and less stable rules.
+
+    vs A NEURAL NETWORK    Logistic regression IS one neuron with a sigmoid.
+                           A network stacks many, learning the feature
+                           transformations you would otherwise hand-engineer.
+
+
+10. THE BRIDGE TO MULTICLASS
+--------------------------------------------------------------------------------
+Everything above assumed two outcomes. For K classes — say predicting which
+genre a user plays next — you need K probabilities that sum to 1, and a sigmoid
+per class cannot guarantee that. Softmax replaces it, cross-entropy
+generalizes, and binary logistic turns out to be the K = 2 case. See
+mathematical_derivation_multiclass.txt.

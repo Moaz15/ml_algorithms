@@ -74,7 +74,7 @@ log-likelihood for some noise model.
 
     Negating gives exactly binary cross-entropy. LOG LOSS IS THE BERNOULLI
     NEGATIVE LOG-LIKELIHOOD. Full gradient and Hessian in
-    Logistic_Regression/theory/BLR_mathematical_derivation.txt; multiclass
+    Logistic_Regression/theory/mathematical_derivation_binary.txt; multiclass
     (categorical / softmax) in the multiclass derivation file.
 
 2.3 Laplace noise -> absolute error

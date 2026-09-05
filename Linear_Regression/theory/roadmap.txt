@@ -1,7 +1,7 @@
 LINEAR REGRESSION — REVISION ROADMAP
 ====================================
 
-1. FOUNDATION                                    -> SLR/concept.txt
+1. FOUNDATION                                    -> SLR/concept.txt, derivation PART 0
 --------------------------------------------------------------------------------
 [x] Definition; predicts E[y|x]
 [x] Model (y = Xβ + ε) vs fit (ŷ = Xβ̂)
@@ -100,7 +100,7 @@ LINEAR REGRESSION — REVISION ROADMAP
 [ ] Ridge in the MLR implementation
 [ ] Cross-check against sklearn
 
-11. USE & COMPARISONS
+11. USE & COMPARISONS                            -> concept.txt sections 8-10
 --------------------------------------------------------------------------------
 [x] Strengths, weaknesses, when to use
 [x] vs PLR / Ridge / Lasso

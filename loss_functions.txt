@@ -145,7 +145,7 @@ Consequences you can use immediately:
     That gradient is the reason logistic regression is written in terms of z:
     the sigmoid derivative cancels against the log, leaving prediction-minus-
     truth, identical in form to the linear-regression gradient. See
-    Logistic_Regression/theory/BLR_mathematical_derivation.txt.
+    Logistic_Regression/theory/mathematical_derivation_binary.txt.
 
     Unbounded: a confident wrong prediction (p -> 0 when y = 1) costs infinity.
     This punishes overconfidence hard and is why numerical guards matter --

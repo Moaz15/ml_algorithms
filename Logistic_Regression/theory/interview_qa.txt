@@ -1,0 +1,91 @@
+LOGISTIC REGRESSION — INTERVIEW Q&A
+===================================
+Theory lives in concept.txt, mathematical_derivation_binary.txt,
+mathematical_derivation_multiclass.txt, assumptions.txt, odds_and_logit.txt,
+regularization.txt and evaluation_metrics.txt.
+
+
+ASSUMPTIONS
+--------------------------------------------------------------------------------
+
+
+Q: What happens if you run standard logistic regression on a continuous target?
+A: The Bernoulli likelihood it maximizes is only defined for y in {0,1}, so the
+   log-likelihood stops being a meaningful quantity. With a target outside
+   [0,1] the loss is undefined; with a target inside [0,1] (a soft label) it
+   still computes, but you are fitting a probability to a probability, not
+   classifying. A continuous target needs a different likelihood — Gaussian
+   gives squared error, counts give Poisson regression.
+   Follow-up: what distribution would you assume for a count target, and what
+   loss does it imply?
+
+Q: How do you handle a target with 3+ unordered classes vs 3+ ordered classes?
+A: Unordered (ad response: no click, click text, click image) goes to
+   multinomial / softmax regression with categorical cross-entropy, which fits
+   one score per class and normalizes them to sum to 1. Ordered (satisfaction:
+   low, medium, high) goes to ordinal logistic regression — the proportional
+   odds model — which preserves the ranking by fitting cumulative thresholds
+   instead of independent per-class scores. Softmax on ordered classes throws
+   the ordering away; encoding the levels as 1, 2, 3 invents equal spacing that
+   is not there.
+
+Q: Derive the probability formula from the logit equation.
+A: Start from ln(p / (1-p)) = z. Exponentiate: p / (1-p) = e^z. Solve for p: p
+   = e^z (1-p), so p(1 + e^z) = e^z, giving p = e^z / (1 + e^z). Divide top and
+   bottom by e^z and you have the sigmoid, p = 1 / (1 + e^(-z)). The sigmoid
+   and the logit are inverses — that is the whole relationship.
+
+Q: A feature has a U-shaped relationship with the target. How does logistic
+   regression behave, and how do you fix it?
+A: Badly, and silently. The linearity assumption is on the LOGIT, and a U-shape
+   means the log-odds fall then rise. A single coefficient averages the two
+   halves to roughly zero, so the model reports the feature as unimportant
+   while misclassifying both extremes. You see poor AUC and high log loss with
+   no obvious culprit. Fix with a quadratic term, binning, or splines / a GAM.
+   Detect it with a binned logit plot before it costs you.
+
+Q: Why fix a linearity violation in logistic regression instead of switching to
+   XGBoost?
+A: Because the model is often chosen for reasons accuracy does not capture.
+   Logistic regression serves in microseconds (a single dot product), scales to
+   billions of sparse features with online learning like FTRL, and produces
+   coefficients that survive regulatory review. In ad ranking, credit scoring
+   and fraud, those constraints usually outrank a point of AUC. Reach for the
+   tree ensemble when none of them bind.
+
+Q: You have 100 event logs from 5 power users and 100 from 100 unique users.
+   Can both go into the same model?
+A: Not as-is. The first 100 rows violate independence — they are 5 people's
+   habits counted 20 times each, so the model over-indexes on them and the
+   standard errors come out far too small, making features look significant
+   when they are not. Options: aggregate to one row per user, use cluster-
+   robust standard errors if you only need honest p-values, or fit a mixed-
+   effects model with a random intercept for user_id.
+   Follow-up: which of those changes the coefficients, and which only changes
+   the standard errors?
+
+Q: Your fraud model's coefficients explode to infinity. What happened?
+A: Perfect or quasi-perfect separation — some feature, often a sparse high-
+   cardinality one, splits the classes exactly. The likelihood is then
+   maximized by pushing that coefficient toward infinity, because a step
+   function fits better than any finite S-curve, so the optimizer never
+   converges. It is common under heavy imbalance, where the rare class has few
+   examples per feature. Fix with L1 or L2 regularization, which makes infinite
+   weights infinitely expensive, with Firth's penalized likelihood, or by
+   merging the offending category.
+
+Q: Why does L2 regularization fix multicollinearity mathematically?
+A: It adds a diagonal term before inversion. The coefficient covariance goes
+   from (XᵀWX)⁻¹ to (XᵀWX + λI)⁻¹, and adding λI lifts every eigenvalue by λ,
+   so the matrix is strictly positive definite and invertible no matter how
+   collinear the features are. Practically, it stops two correlated features
+   taking huge equal-and-opposite coefficients, because that solution now
+   carries a large penalty.
+
+Q: How do L1 and L2 differ in handling noisy features?
+A: L2 shrinks every coefficient smoothly toward zero but essentially never to
+   exactly zero, so noisy features stay in the model with reduced influence.
+   L1's constraint region has corners on the axes, so the optimum often lands
+   exactly on one, zeroing the coefficient outright and performing feature
+   selection. With a group of correlated features L1 keeps one arbitrarily and
+   drops the rest, which is why Elastic Net exists.

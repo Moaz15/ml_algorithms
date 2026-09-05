@@ -1,0 +1,148 @@
+LOGISTIC REGRESSION — REVISION ROADMAP
+======================================
+
+1. FOUNDATION                         -> concept.txt + derivation_binary
+--------------------------------------------------------------------------------
+[x] Classification, not regression; goal is P(y=1|x), not just a label
+[x] Linear score z = θᵀx + b as the starting point
+[x] Why a raw linear score fails: probabilities must lie in [0,1]
+[x] Sigmoid: range, differentiability, monotonicity
+[x] Decision rule at 0.5
+[x] Why linear regression on a 0/1 target is wrong (predicts <0 and >1,
+    wrong loss, cannot flatten near 0 and 1)
+
+2. ODDS, LOGIT AND INTERPRETATION     -> odds_and_logit.txt
+--------------------------------------------------------------------------------
+[x] Probability vs odds vs log-odds
+[x] Logit = log(p/(1-p)) is the inverse of the sigmoid
+[x] The model is LINEAR IN THE LOG-ODDS — this is the whole trick
+[x] Coefficient reading: θⱼ is the change in log-odds per unit of xⱼ
+[x] Odds ratio e^θⱼ, and why that is the number you report
+[x] Feature importance: standardize first; magnitude is not importance
+
+3. THE LOSS                           -> mathematical_derivation_binary.txt
+--------------------------------------------------------------------------------
+[x] Likelihood of one point: P(y|x) = ŷ^y (1-ŷ)^(1-y)
+[x] Log-likelihood -> Binary Cross-Entropy
+[x] BCE is convex, so GD reaches the global minimum
+[ ] Why NOT MSE: non-convex in θ under the sigmoid, plus vanishing gradients
+[ ] MLE properly: likelihood, log-likelihood, why ML uses it (todo 4)
+[ ] Cross-entropy as KL divergence / surprise — the information view
+
+4. OPTIMIZATION                       -> mathematical_derivation_binary.txt
+--------------------------------------------------------------------------------
+[x] Gradient descent update rule
+[x] Gradient (ŷ - y)·x — same shape as linear regression, different ŷ
+[x] Learning rate: role and effect
+[x] Why no closed form (transcendental; no normal equation)
+[ ] Newton's method / IRLS — named in the file, never explained
+[ ] Feature scaling: why it matters here too
+[ ] Perfect separation: coefficients diverge to infinity, and why L2 fixes it
+
+5. DECISION BOUNDARY AND THRESHOLD    -> mathematical_derivation_binary.txt
+--------------------------------------------------------------------------------
+[x] Boundary at z = 0, so logistic regression is a LINEAR classifier
+[x] Non-linear boundaries need engineered features (todo 10)
+[ ] 0.5 is a default, not a law — move it based on FP vs FN cost
+[ ] Threshold from the PR or ROC curve, not by guessing
+
+6. MULTICLASS                         -> mathematical_derivation_multiclass.txt
+--------------------------------------------------------------------------------
+[x] One score per class; z = Wx + b
+[x] Why sigmoid is not enough (must sum to 1 across K)
+[x] Softmax and its properties
+[x] Categorical cross-entropy
+[x] Gradient result: (ŷ - y)xᵀ, same clean form
+[ ] Numerical stability: subtract max(z) before exponentiating
+[ ] One-vs-Rest vs Softmax — when each, cost, calibration (todo 3)
+[ ] One-vs-One, and why sklearn uses it for SVM but not here
+[ ] Binary logistic as the K=2 case of softmax
+
+7. ASSUMPTIONS                        -> assumptions.txt
+--------------------------------------------------------------------------------
+[x] Binary / categorical outcome
+[x] Linearity of the LOGIT with predictors (not of y)
+[x] Independence of observations
+[x] No perfect multicollinearity
+[x] Adequate sample size; rare class problem
+[x] No extreme outliers
+[x] What logistic regression does NOT assume: normality of features,
+    homoscedasticity, linear relationship with y
+
+8. REGULARIZATION                     -> regularization.txt (empty)
+--------------------------------------------------------------------------------
+[ ] Why it is needed: separation, high-dimensional data, correlated features
+[ ] L2 (ridge): shrinks, keeps all features, fixes divergence
+[ ] L1 (lasso): sparsity, feature selection
+[ ] Elastic Net
+[ ] sklearn's C = 1/λ — inverted, and a classic interview trip-up
+[ ] Do not penalize the intercept; standardize first
+
+9. EVALUATION                         -> evaluation_metrics.txt
+--------------------------------------------------------------------------------
+[x] Confusion matrix; TP / FP / FN / TN
+[x] Accuracy, and when it lies (imbalance)
+[x] Precision, recall, F1; specificity
+[x] ROC curve and AUC-ROC
+[x] Precision-Recall curve and AUC-PR
+[x] Threshold-based metrics
+[x] Multiclass: macro / micro / weighted averaging
+[ ] ROC vs PR: why PR is the honest one under heavy imbalance
+[ ] Log loss and Brier score as metrics, not just as training losses
+[ ] Calibration: reliability curves, Platt scaling, isotonic
+
+10. CLASS IMBALANCE                   -> ../../handling_imbalanced_data.txt
+--------------------------------------------------------------------------------
+[ ] class_weight / cost-sensitive loss
+[ ] Resampling: SMOTE, undersampling, and their risks
+[ ] Threshold moving as the cheapest fix
+[ ] Why resampling breaks calibration
+
+11. IMPLEMENTATION                    -> ../scratch_code/
+--------------------------------------------------------------------------------
+[x] Binary: sigmoid, BCE, GD, L2, early stopping (blr_scratch_implementation.py)
+[x] Softmax: one-hot, stable softmax, GD, L2 (mlr_scratch_implementation.py)
+[x] Serving: FastAPI /predict with saved artifacts (main.py, predict_driver.py)
+[ ] One-vs-Rest at code level (todo 3)
+[ ] Polynomial / interaction features (todo 10)
+[ ] End-to-end practice on a real dataset (todo 11)
+[ ] Cross-check against sklearn LogisticRegression
+
+12. USE AND COMPARISONS               -> concept.txt
+--------------------------------------------------------------------------------
+[ ] Strengths: calibrated probabilities, interpretable, fast, strong baseline
+[ ] Weaknesses: linear boundary, needs feature engineering, sensitive to
+    separation and outliers
+[ ] vs Linear regression — different target, loss, and output meaning
+[ ] vs SVM — hinge vs log loss; margin vs probability
+[ ] vs Naive Bayes — discriminative vs generative
+[ ] vs Decision trees — linear/global vs axis-aligned/local
+[ ] vs a single-layer neural net — logistic regression IS one neuron
+
+
+DRILL QUESTIONS
+--------------------------------------------------------------------------------
+[ ] Why not just run linear regression on a 0/1 label?
+[ ] Derive BCE from maximum likelihood.
+[ ] Why is MSE a bad loss here?
+[ ] Why is there no closed-form solution?
+[ ] What exactly does a coefficient mean? Give it in odds.
+[ ] Why is the decision boundary linear despite a non-linear sigmoid?
+[ ] Sigmoid vs softmax — and what happens at K = 2?
+[ ] Your model has 99% accuracy on a 1%-positive dataset. What do you check?
+[ ] ROC-AUC or PR-AUC, and why?
+[ ] What is perfect separation, and how does regularization rescue it?
+[ ] In sklearn, does a bigger C mean more or less regularization?
+[ ] How do you pick a threshold for a fraud model?
+
+
+GAPS TO CLOSE (in order)
+--------------------------------------------------------------------------------
+1. [ ] regularization.txt — section 8, incl. perfect separation (todo 8)
+2. [ ] Why-not-MSE and MLE in depth (todo 4)
+       -> extend mathematical_derivation_binary.txt
+3. [ ] OvR vs Softmax — theory plus code (todo 3)
+4. [ ] Threshold selection and calibration — extend evaluation_metrics.txt
+5. [ ] interview_qa.txt — assumptions section done; add derivation,
+       multiclass, regularization and evaluation sections
+6. [ ] Polynomial features (todo 10) and a practice dataset (todo 11)

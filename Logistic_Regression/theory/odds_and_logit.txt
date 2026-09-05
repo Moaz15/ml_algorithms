@@ -1,0 +1,234 @@
+ODDS, LOG-ODDS AND READING COEFFICIENTS
+=======================================
+
+THE PROBLEM THIS FILE SOLVES
+--------------------------------------------------------------------------------
+We want to keep the thing that makes linear models good — a weighted sum of
+features — and use it to predict whether a subscriber churns.
+
+    score = -2.0 + 0.8·weeks_inactive - 0.03·tenure_months + 1.2·is_trial
+
+A weighted sum can come out as -2, as 0.4, as 17. It can be any real number, and
+there is no way to stop it. But a probability has to sit between 0 and 1.
+
+So the two sides do not fit. Either we cripple the right-hand side, or we find
+something on the left that CAN take any real number and still carries the
+information we want. The second option is what logistic regression does, and it
+takes two steps.
+
+
+STEP 1 — ODDS REMOVE THE CEILING
+--------------------------------------------------------------------------------
+Instead of "12% of users like this churn", say it as a ratio:
+
+    12 churn for every 88 who stay
+
+That is odds: how many times more likely the event is than its absence.
+
+    odds = p / (1 - p)
+
+    p = 0.12  ->  0.12 / 0.88  =  0.136     "about 1 to 7"
+    p = 0.50  ->  0.50 / 0.50  =  1.0       "even money, 1 to 1"
+    p = 0.75  ->  0.75 / 0.25  =  3.0       "3 to 1"
+    p = 0.90  ->  0.90 / 0.10  =  9.0       "9 to 1"
+
+Watch what the denominator does. As p climbs toward 1, (1-p) shrinks toward zero
+and the odds shoot off to infinity. The ceiling at 1 is gone — odds live in
+(0, infinity).
+
+Note before going further: odds are NOT probability. p = 0.75 is "3 to 1", not
+3. Everyday speech blurs these ("a 3 to 1 chance") and interviewers check
+whether you do.
+
+Halfway there. But odds still cannot go negative, and our weighted sum certainly
+can.
+
+
+STEP 2 — THE LOG REMOVES THE FLOOR
+--------------------------------------------------------------------------------
+Take the natural log of the odds:
+
+    log-odds = ln( p / (1-p) )
+
+Logs turn a floor at zero into no floor at all: ln of a tiny positive number is
+a large negative one. Now the left-hand side spans (-infinity, +infinity),
+exactly like our weighted sum.
+
+All three scales side by side:
+
+        p       odds     log-odds
+      0.10      0.111      -2.197
+      0.25      0.333      -1.099
+      0.50      1.000       0.000
+      0.75      3.000       1.099
+      0.90      9.000       2.197
+
+Same information three ways — each converts to the others exactly. But look at
+the log-odds column: it is SYMMETRIC around zero. p = 0.9 and p = 0.1 sit at
++2.197 and -2.197, mirror images. Probability has no such symmetry, and odds
+certainly do not (9 versus 0.111).
+
+That symmetry is why the scale is pleasant to model on. Zero means "even odds,
+no evidence either way", positive means the event is favoured, negative means it
+is not, and the distances are comparable in both directions.
+
+
+STEP 3 — THAT IS THE WHOLE MODEL
+--------------------------------------------------------------------------------
+Put the weighted sum on the right and the log-odds on the left, and nothing is
+left to fix:
+
+    ln( p / (1-p) ) = β₀ + β₁x₁ + ... + βₙxₙ
+
+This is why the assumption is stated as "linear in the LOGIT" rather than
+"linear in p" (assumptions.txt section 2). The logit is just the name for
+ln(p/(1-p)).
+
+To get a probability back out, undo the two steps. Exponentiate to undo the log,
+then rearrange to undo the ratio:
+
+    from  ln(p/(1-p)) = z
+          p/(1-p) = e^z
+          p = e^z(1-p)  ->  p(1 + e^z) = e^z  ->  p = e^z / (1 + e^z)
+          p = 1 / (1 + e^(-z))
+
+That last line is the sigmoid. So the logit and the sigmoid are inverses: the
+logit takes probability to score, the sigmoid takes score back to probability.
+Logistic regression is a linear model on the logit, read back through the
+sigmoid.
+
+
+READING A COEFFICIENT
+--------------------------------------------------------------------------------
+Back to the churn model. What does 0.8 on weeks_inactive actually mean?
+
+Strictly: each extra inactive week adds 0.8 to the LOG-ODDS of churn, holding
+the other features fixed. True, complete, and useless in a meeting — nobody
+thinks in log-odds.
+
+So undo the log, the same way we did above. The model is additive in log-odds,
+which makes it MULTIPLICATIVE in odds:
+
+    odds ratio = e^β
+
+    weeks_inactive   β = +0.80   e^0.80 = 2.23
+                     each inactive week MULTIPLIES the odds of churn by 2.2
+
+    is_trial         β = +1.20   e^1.20 = 3.32
+                     trial users have 3.3x the odds of churn of paid users,
+                     all else equal
+
+    tenure_months    β = -0.03   e^-0.03 = 0.97
+                     each extra month multiplies the odds by 0.97, about 3%
+                     lower
+
+Reading the number:
+
+    OR > 1    raises the odds     (positive coefficient)
+    OR = 1    no effect            (coefficient of zero)
+    OR < 1    lowers the odds     (negative coefficient)
+
+An OR below 1 often reads better inverted: 0.25 is "a quarter the odds", the
+same claim as "4x the odds the other way round".
+
+Two cautions:
+  - An odds ratio is not a risk ratio. "3.3x the odds" is not "3.3x as likely".
+    They are close only when the probabilities involved are small.
+  - It applies per ONE UNIT of the feature. Measure tenure in years instead of
+    months and the same relationship reports OR = 0.70, not 0.97. Always say
+    what the unit is.
+
+
+WHY THE SAME COEFFICIENT DOES DIFFERENT THINGS TO PROBABILITY
+--------------------------------------------------------------------------------
+Here is the consequence people miss. The coefficient is constant on the log-odds
+scale. It is NOT constant on the probability scale.
+
+Take that same +0.8 from one extra inactive week, applied to three users who
+start at different scores:
+
+    starting z    p before    p after    change in p
+       -2.0        0.119       0.232       +0.113
+        0.0        0.500       0.690       +0.190
+       +2.0        0.881       0.943       +0.062
+
+Same coefficient, same one-week change, three different effects. The impact is
+biggest near p = 0.5, where the sigmoid is steepest, and shrinks at both ends
+where it flattens out.
+
+    In plain terms: one inactive week matters enormously for a user on the fence
+    and barely at all for one already certain to leave.
+
+Which is exactly the behaviour we wanted when we rejected the straight line in
+concept.txt — probability has to flatten near 0 and 1.
+
+So never say "this feature raises churn probability by 8%". Say it in odds, or
+quote the probability change for a stated starting point.
+
+
+THE INTERCEPT, AND CATEGORICAL FEATURES
+--------------------------------------------------------------------------------
+INTERCEPT. The -2.0 is the log-odds when every feature is zero: a paid user with
+zero weeks inactive and zero tenure. Convert it the usual way — e^-2.0 = 0.135,
+so odds of about 1 in 7.4, or p = 0.119. As in linear regression, it only means
+something if "all features zero" is a real state; centre the continuous features
+if it is not.
+
+CATEGORICAL FEATURES are read against their reference level. One-hot encode plan
+type and drop "monthly" as the reference. A coefficient of -0.5 on is_annual
+then means:
+
+    annual subscribers have e^-0.5 = 0.61 times the odds of churn
+    OF A MONTHLY SUBSCRIBER
+
+— not in absolute terms. Change which level you dropped and every one of those
+numbers changes, though the predictions do not.
+
+
+COMPARING FEATURES AGAINST EACH OTHER
+--------------------------------------------------------------------------------
+It is tempting to rank features by coefficient size. In our model:
+
+    weeks_inactive   β = +0.80    ranges over roughly 0 to 8 in the data
+    tenure_months    β = -0.03    ranges over roughly 0 to 60
+
+0.80 looks 27 times larger than 0.03. But multiply each coefficient by the range
+it actually moves over: inactivity shifts the log-odds by up to +6.4, tenure by
+up to -1.8. Still bigger, but nothing like 27x.
+
+And the coefficient is not even a fixed property of the feature. Switch tenure
+from months to years and it changes from -0.03 to -0.36, with identical data and
+identical predictions. A number that moves when you change units cannot measure
+importance.
+
+To rank features honestly:
+  1. STANDARDIZE the features, then refit. Each coefficient is then the log-odds
+     change per one standard deviation — a common footing.
+  2. Quote the standard error alongside. 0.6 +/- 0.5 is a shrug; 0.2 +/- 0.02 is
+     a finding.
+  3. Remember correlated features split the credit arbitrarily and can swap
+     ranks between refits. Neither ranking is real (assumptions.txt section 4).
+
+With L1 regularization, a coefficient of zero means "not needed given the
+others", not "irrelevant".
+
+
+QUICK REFERENCE
+--------------------------------------------------------------------------------
+    probability -> odds          odds = p / (1 - p)
+    odds -> probability          p = odds / (1 + odds)
+    probability -> log-odds      z = ln( p / (1-p) )
+    log-odds -> probability      p = 1 / (1 + e^(-z))
+    coefficient -> odds ratio    OR = e^β
+    odds ratio -> coefficient    β = ln(OR)
+
+    p = 0.5  <->  odds 1  <->  z = 0
+    p = 0.75 <->  odds 3  <->  z = +1.10
+    p = 0.9  <->  odds 9  <->  z = +2.20
+
+Traps worth rehearsing:
+  - Odds are not probability, and an odds ratio is not a risk ratio.
+  - Coefficients are additive in log-odds, multiplicative in odds, and neither
+    in probability.
+  - A one-unit change means nothing until you say what the unit is.
+  - Raw coefficient sizes cannot be compared across differently-scaled features.
