@@ -1,12 +1,6 @@
 STAGE 4b: FEATURE SELECTION AND IMPORTANCE SCORING
 ================================================================================
 
-Feature ENGINEERING (creating features) lives in ../../FeatureEngineering/.
-Feature EXTRACTION (PCA, t-SNE, autoencoders) lives in
-../../Dimensionality_Reduction/. This file is about choosing which of the
-features you already have to keep - a decision that is model-agnostic in its
-logic even though the tools differ per model.
-
 --------------------------------------------------------------------------------
 1. WHY SELECT AT ALL
 --------------------------------------------------------------------------------

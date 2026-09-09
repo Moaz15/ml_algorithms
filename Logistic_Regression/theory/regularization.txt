@@ -1,0 +1,218 @@
+REGULARIZATION IN LOGISTIC REGRESSION
+=====================================
+Assumptions this rescues: assumptions.txt sections 4 and 5.
+Implementation: ../scratch_code/blr_scratch_implementation.py (lambda_).
+General theory: ../../regularization_concept.txt.
+
+
+THE FAILURE THAT MOTIVATES IT
+--------------------------------------------------------------------------------
+You fit a fraud model on 50,000 transactions. It does not converge. The
+coefficients come back in the hundreds, the standard errors are astronomical,
+and the training loss is still creeping toward zero when the loop runs out.
+
+Nothing is broken. One sparse feature — say a rare merchant category — happened
+to be 1 for every fraud case in the training set and 0 for everything else. That
+is PERFECT SEPARATION, and maximum likelihood responds to it in a completely
+rational way.
+
+Here is why. Maximum likelihood wants to make the observed labels as probable as
+possible. If that one feature splits the classes exactly, then pushing its
+coefficient higher always helps:
+
+    coefficient = 2     fraud cases get p = 0.88     likelihood decent
+    coefficient = 5     fraud cases get p = 0.993    likelihood better
+    coefficient = 20    fraud cases get p = 0.99999  likelihood better still
+
+There is no stopping point. The best possible fit is a step function, and a
+sigmoid only becomes a step as its coefficient goes to infinity. So the
+optimizer walks that coefficient upward forever.
+
+Two things to notice, because they generalize:
+  - Nothing in the objective says "a huge weight is suspicious". The likelihood
+    has no opinion on the size of a coefficient, only on the fit.
+  - The model is not wrong on the training data. It is perfect on the training
+    data. It has simply memorized a coincidence.
+
+This is more likely with few events per variable, rare classes, and
+high-cardinality categorical features — the conditions in assumptions.txt
+section 5.
+
+
+THE FIX: MAKE LARGE WEIGHTS EXPENSIVE
+--------------------------------------------------------------------------------
+If the likelihood will not object to a coefficient of 20, add a term that does.
+Keep the original loss and attach a penalty that grows with the size of the
+weights:
+
+    J(θ) = binary cross-entropy  +  λ · (penalty on the size of θ)
+
+Now the optimizer faces a trade. A bigger coefficient buys a better fit and
+costs more penalty, so it stops where the two balance. An infinite weight now
+carries an infinite cost, so divergence is impossible by construction.
+
+λ (lambda) sets the exchange rate:
+
+    λ = 0        no penalty; back to plain maximum likelihood and its divergence
+    λ small      mild shrinkage; the fit still dominates
+    λ large      weights are crushed toward zero; the model underfits and
+                 predicts close to the base rate for everyone
+
+So λ is a dial between "fit this data exactly" and "keep the model simple",
+which is the bias-variance trade-off in its usual form.
+
+
+L2 — RIDGE
+--------------------------------------------------------------------------------
+Penalize the sum of SQUARED weights:
+
+    J(θ) = BCE + (λ / 2m) · Σ θⱼ²
+
+This is what the scratch implementation uses. In the gradient it appears as a
+single extra term:
+
+    dθ = (1/m) Xᵀ(ŷ - y) + (λ/m) θ
+
+Read that second term as a constant pull toward zero, proportional to the
+current weight. A large weight is pulled hard, a small one barely at all, so
+every step shrinks the weights slightly before the data gets to push them back
+out.
+
+What it does:
+  - Shrinks every coefficient smoothly toward zero, essentially never reaching
+    exactly zero. All features stay in the model with reduced influence.
+  - Stops separation cold: infinite weights are now infinitely expensive.
+  - Stabilizes correlated features. Recall from assumptions.txt section 4 that
+    two collinear features can take huge equal-and-opposite coefficients that
+    cancel out. Squaring makes that pair enormously expensive, so ridge splits
+    the weight between them instead — a far more stable answer.
+
+That last point is the mathematical version of the same statement: the
+coefficient covariance goes from (XᵀWX)⁻¹ to (XᵀWX + λI)⁻¹, and adding λI lifts
+every eigenvalue, so the matrix is invertible no matter how collinear the
+features are.
+
+L2 is the sensible default. Use it unless you specifically want feature
+selection.
+
+
+L1 — LASSO
+--------------------------------------------------------------------------------
+Penalize the sum of ABSOLUTE weights instead:
+
+    J(θ) = BCE + λ · Σ |θⱼ|
+
+The difference looks cosmetic and is not. L2's pull toward zero is proportional
+to the weight, so it weakens as the weight shrinks and never quite finishes the
+job. L1's pull is CONSTANT — the gradient of |θ| is ±1 regardless of size — so a
+small weight gets pulled just as hard as a large one, and it is pushed the last
+step to exactly zero.
+
+The geometric version: the L1 constraint region is a diamond with corners on the
+axes, and a corner is exactly the point where one coordinate is zero. Optima
+tend to land on corners.
+
+The consequence is SPARSITY. Coefficients go to exactly zero, so the model
+selects its own features.
+
+    A churn model with 5,000 candidate features — every genre, device and
+    behavioural flag. L1 at a suitable λ keeps perhaps 60 of them and zeroes the
+    rest. What ships is a model you can read.
+
+Two cautions:
+  - |θ| is not differentiable at zero, so there is no clean gradient step. L1 is
+    solved with coordinate descent or proximal methods, not plain gradient
+    descent.
+  - Among correlated features, L1 keeps one essentially at random and zeroes the
+    rest. A zero means "not needed given the others", never "irrelevant" — a
+    distinction that matters when someone reads your coefficients as importance.
+
+
+ELASTIC NET
+--------------------------------------------------------------------------------
+    J(θ) = BCE + λ₁ Σ |θⱼ| + λ₂ Σ θⱼ²
+
+Both penalties at once. You get L1's sparsity while L2 handles the correlated
+groups gracefully, so instead of arbitrarily keeping one of five correlated
+features it tends to keep or drop them together.
+
+Use it when the data is wide AND the features are correlated — text, genomics,
+and most behavioural feature sets. The cost is a second hyperparameter to tune.
+
+
+CHOOSING λ
+--------------------------------------------------------------------------------
+There is no formula. Sweep it and let held-out data decide:
+
+  1. Standardize the features (see the next section — this is not optional).
+  2. Try λ across a log scale: 0.001, 0.01, 0.1, 1, 10, 100.
+  3. For each, run k-fold cross-validation and record the validation metric —
+     log loss if you need calibrated probabilities, PR-AUC under imbalance.
+  4. Take the best. Where the curve is flat near the optimum, prefer the LARGER
+     λ: more regularization for the same performance is a better trade.
+
+What you should see: validation error falls as λ rises from zero (variance being
+removed), bottoms out, then climbs as the model starts underfitting. Training
+error only ever rises.
+
+If the best λ is at the very edge of your grid, extend the grid — the optimum is
+outside it.
+
+
+TWO RULES THAT ARE EASY TO GET WRONG
+--------------------------------------------------------------------------------
+STANDARDIZE FIRST. The penalty is computed on the raw coefficient values, and
+coefficients carry units (odds_and_logit.txt). Tenure in months gets a small
+coefficient, so it is barely penalized; the same feature in years gets a
+coefficient roughly 12 times larger and is punished far harder — for no reason
+other than the unit you chose. Without standardization, λ silently means
+something different for every feature.
+
+DO NOT PENALIZE THE INTERCEPT. The intercept sets the base rate, and shrinking
+it toward zero drags every prediction toward p = 0.5 regardless of how common
+the event actually is. It is not a measure of any feature's influence, so it
+should not be charged for its size. The scratch implementation gets this right:
+the penalty term is added to d_theta, and d_bias is left alone.
+
+
+THE C TRAP IN SCIKIT-LEARN
+--------------------------------------------------------------------------------
+sklearn's LogisticRegression does not take λ. It takes C, and
+
+    C = 1 / λ
+
+which INVERTS the meaning. This catches people constantly:
+
+    C = 0.01    strong regularization      (large λ)
+    C = 1.0     the default, moderate
+    C = 100     weak regularization        (small λ)
+
+So "increase C to regularize more" is backwards, and it is a deliberate
+interview question. Sanity check by looking at the coefficients: if they
+shrank, you regularized more.
+
+Two related defaults worth knowing: sklearn applies L2 regularization BY
+DEFAULT, so a "plain" LogisticRegression is already penalized — which is why it
+quietly survives separated data that would break a textbook implementation. And
+the solver must match the penalty: liblinear or saga for L1, saga for elastic
+net.
+
+
+WHAT REGULARIZATION DOES NOT FIX
+--------------------------------------------------------------------------------
+It bounds the coefficients. It does not repair the model:
+
+  - A wrong functional form stays wrong. If the logit is genuinely U-shaped in a
+    feature, shrinking the coefficient does not add the curvature you need
+    (assumptions.txt section 2).
+  - Confounding stays confounded. A biased coefficient that has been shrunk is
+    still biased.
+  - Correlated data stays correlated. Regularization does nothing about repeated
+    measures on the same user.
+  - Class imbalance is a separate problem with separate fixes. It is also worth
+    knowing that heavy regularization pulls predictions toward the middle and
+    therefore damages CALIBRATION — see evaluation_metrics.txt section 11.
+
+And note what it costs: coefficients are deliberately biased toward zero, so the
+estimator is no longer the unbiased maximum-likelihood one. That is the trade
+you are making on purpose — a little bias for a large drop in variance.

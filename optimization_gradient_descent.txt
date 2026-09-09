@@ -1,118 +1,651 @@
+================================================================================
+OPTIMIZATION: GRADIENT DESCENT
+================================================================================
+First-order optimization for ML training: mechanics, variants, optimizers,
+schedules, failure modes, tuning. Practical and interview focused; Q&A in
+section 16.
 
-1. CORE FOUNDATIONS & MATHEMATICS
+Related notes: convex_concave.txt (convexity, Hessian tests), loss_functions.txt
+(what is being minimized), regularization_concept.txt (L1/L2),
+cross_validation.txt (early stopping),
+Linear_Regression/theory/mathematical_derivation.txt (normal equation vs GD).
+
+
+CONTENTS
 --------------------------------------------------------------------------------
-* Definition: An iterative optimization algorithm used to minimize a cost 
-  function J(theta) by updating parameters in the direction of steepest descent.
+ 1. CORE MECHANICS
+      update rule; why the negative gradient descends; minima, saddles, plateaus
+ 2. BATCH vs STOCHASTIC vs MINI-BATCH
+      comparison matrix; updates per epoch; shuffling; why mini-batch wins
+ 3. LEARNING RATE: STABILITY AND CONVERGENCE
+      too high vs too low; the alpha < 2/L limit; what convergence guarantees
+      exist; LR decay conditions and the SGD noise floor
+ 4. CONDITIONING AND FEATURE SCALING
+      elongated contours and zig-zag; condition number; collinearity;
+      scaling, normalization layers and L2 as conditioners
+ 5. MOMENTUM
+      heavy-ball update; effective step 1/(1-beta); Nesterov; framework variants
+ 6. ADAPTIVE OPTIMIZERS
+      AdaGrad, RMSProp, Adam, AdamW; bias correction; decoupled weight decay;
+      LARS/LAMB; optimizer-state memory; Adam vs SGD trade-off
+ 7. LEARNING RATE SCHEDULES AND TUNING
+      step, cosine, one-cycle, warmup; LR range test; LR-batch scaling rules;
+      the order in which to tune hyperparameters
+ 8. GRADIENT PATHOLOGIES AND NUMERICAL STABILITY
+      vanishing and exploding gradients; clipping; NaN causes; mixed precision;
+      numerical gradient checking; dead ReLU
+ 9. NON-DIFFERENTIABLE OBJECTIVES
+      subgradients; proximal step and soft-thresholding; coordinate descent
+10. SECOND-ORDER METHODS
+      Newton, IRLS, L-BFGS, Gauss-Newton; why deep learning stays first-order
+11. BATCH SIZE, NOISE AND GENERALIZATION
+      gradient variance; large-batch gap; flat vs sharp minima;
+      gradient accumulation; weight averaging (EMA, SWA)
+12. DISTRIBUTED TRAINING
+      data vs tensor vs pipeline parallelism; All-Reduce; ZeRO/FSDP sharding
+13. DIAGNOSTICS AND DEBUGGING
+      what to log; stopping criteria; loss-curve symptom table; debug order
+14. WHEN NOT TO USE GRADIENT DESCENT
+      closed form; specialized solvers; trees; discrete parameters; EM; HPO
+15. OPTIMIZER SELECTION CHEAT-SHEET
+16. INTERVIEW Q&A (20 questions)
 
-* The Update Rule:
+
+1. CORE MECHANICS
+--------------------------------------------------------------------------------
+Goal: minimize J(theta) iteratively when there is no closed form, or when d and
+m are too large for one.
+
   theta := theta - alpha * grad_J(theta)
-  
-  - theta: Model weights/biases.
-  - alpha: Learning rate (step size).
-  - grad_J(theta): Gradient vector (partial derivatives of J with respect to 
-    each parameter).
 
-* Mathematical Guarantee: 
-  By first-order Taylor Series approximation, moving in the direction of the 
-  negative gradient ensures the dot product of your step and the gradient is 
-  strictly negative:
-  -alpha * ||grad_J(theta)||^2 < 0
-  
-  This mathematically guarantees a local decrease in loss for a sufficiently 
-  small alpha.
+  theta          weights and biases
+  alpha          learning rate (step size)
+  grad_J(theta)  vector of partial derivatives of J w.r.t. each parameter
+
+Why the negative gradient works (first-order Taylor):
+  J(theta - alpha*g) ~ J(theta) - alpha*||g||^2
+The correction term is strictly negative, so the loss decreases for a
+sufficiently small alpha. The negative gradient is the direction of steepest
+local descent - not the fastest route to the minimum (see section 4).
+
+Points where grad = 0:
+  - Minimum: all Hessian eigenvalues positive.
+  - Saddle point: mixed-sign eigenvalues; dominant in high dimensions.
+  - Plateau: gradient near zero over a wide region.
+Plain GD stalls at all three; momentum and adaptive methods do not (sec 5-6).
+
+The gradient itself comes from backpropagation (reverse-mode autodiff) in deep
+nets, or analytically for linear and logistic regression.
 
 
-2. CORE VARIANTS: COMPARISON MATRIX
+2. BATCH vs STOCHASTIC vs MINI-BATCH
 --------------------------------------------------------------------------------
-+--------------------+---------------------+-------------------+---------------------+
-| Feature            | Batch GD            | Stochastic GD     | Mini-Batch GD       |
-+--------------------+---------------------+-------------------+---------------------+
-| Data per Update    | Entire dataset      | 1 random sample   | A small subset      |
-|                    | (m samples)         |                   | (size B, ex: 32-256)|
-+--------------------+---------------------+-------------------+---------------------+
-| Updates per Epoch  | 1                   | m                 | m / B               |
-+--------------------+---------------------+-------------------+---------------------+
-| Convergence Path   | Smooth and          | Highly noisy /    | Relatively smooth   |
-|                    | deterministic       | zig-zag           | with minor noise    |
-+--------------------+---------------------+-------------------+---------------------+
-| Memory Footprint   | High (scales with   | Extremely low     | Low to Medium       |
-|                    | dataset)            | (1 sample)        | (depends on B)      |
-+--------------------+---------------------+-------------------+---------------------+
-| Hardware Fit       | Poor for large data | Poor (no parallel)| Excellent (highly   |
-|                    |                     |                   | optimized for GPUs) |
-+--------------------+---------------------+-------------------+---------------------+
-| Local Minima       | Easily trapped      | Escapes easily    | Can escape due to   |
-|                    |                     | due to noise      | moderate noise      |
-+--------------------+---------------------+-------------------+---------------------+
+  Property           Batch GD          SGD               Mini-Batch GD
+  -----------------  ----------------  ----------------  ------------------
+  Samples/update     all m             1                 B (32-512)
+  Updates/epoch      1                 m                 m / B
+  Gradient           exact             very noisy        low-noise estimate
+  Path               smooth            zig-zag           mildly noisy
+  Memory             scales with m     minimal           set by B
+  Hardware fit       poor              no parallelism    GPU-optimal
+  Escapes saddles    no                yes (noise)       yes
+  Typical use        small data        online/streaming  the default
+
+- Mini-batch is the default. Choose B for hardware (powers of 2, fill the GPU)
+  and for noise level, not by theory.
+- Batch GD's better per-iteration rate is misleading: it pays O(m) per step
+  while SGD pays O(1), so SGD reaches a useful loss far sooner on large data.
+- Shuffle every epoch. On class-sorted data, consecutive batches pull weights in
+  contradictory directions and the loss oscillates cyclically. Reshuffling each
+  epoch (no replacement) also converges faster than sampling with replacement.
 
 
-3. SCALE-UP DYNAMICS & DISTRIBUTED TRAINING
+3. LEARNING RATE: STABILITY AND CONVERGENCE
 --------------------------------------------------------------------------------
-When scaling models to billions of parameters across hundreds of GPUs, distributed 
-paradigms are required:
+alpha is the single most important hyperparameter.
 
-* Data Parallelism (DP): 
-  The model fits on one GPU. The large mini-batch is split across GPUs. Each 
-  calculates local gradients; an All-Reduce network operation averages them 
-  across all devices before updating.
+  Too high  overshoots the minimum; loss oscillates or diverges to NaN.
+  Too low   crawls, wastes compute, can stall on a plateau.
 
-* Model Parallelism (MP): 
-  The model is too big for a single GPU's memory.
-  - Tensor Parallelism: Slices weight matrices within a layer across multiple 
-    GPUs (requires ultra-fast NVLink).
-  - Pipeline Parallelism: Slices sequential layers across multiple GPUs (uses 
-    1F1B scheduling to reduce idle "bubbles").
+Formal limit: for an L-smooth loss (L = largest Hessian eigenvalue) GD is stable
+only for alpha < 2/L, and alpha = 1/L is the fastest fixed step. So the usable
+alpha depends on the curvature of your data - there is no universal value. In
+practice, find it with an LR range test (section 7) rather than by estimating L.
 
-* The Large-Batch Phenomenon: 
-  Scaling batch sizes drastically (e.g., 256 to 32,768) causes a "generalization 
-  gap" because the gradient becomes too smooth, trapping the model in sharp, 
-  poor local minima.
-  - Fix 1 (Linear Scaling Rule): If batch size increases by factor k, multiply 
-    alpha by k.
-  - Fix 2 (Learning Rate Warmup): Linearly ramp up alpha from 0 to the target 
-    rate over the first few epochs to avoid initial divergence.
-  - Fix 3 (Adaptive Layer Optimizers): Use LARS (for CNNs) or LAMB (for 
-    Transformers) to scale learning rates per layer dynamically.
+What convergence actually guarantees:
+  - Convex + smooth: converges to the global minimum, error ~ O(1/t).
+  - Strongly convex: linear convergence; iterations scale with the condition
+    number kappa (section 4).
+  - Non-convex (any deep net): only a stationary point is guaranteed - no global
+    optimum. In practice we optimize until validation stops improving.
+
+Learning-rate decay is not optional for exact convergence: SGD converges to the
+minimum only if sum(alpha_t) = infinity and sum(alpha_t^2) < infinity (e.g.
+alpha_t = alpha_0 / t). With a constant alpha, SGD ends up bouncing inside a
+noise ball around the minimum whose radius grows with alpha and with the
+gradient variance sigma^2/B. That noise ball is the flat noisy plateau in a loss
+curve, and decaying alpha late in training is what produces the characteristic
+sudden drop.
 
 
-Q1: What happens if the learning rate (alpha) is too high or too low?
-A1: - Too High: The step size overshoots the minimum, violating the Taylor 
-      expansion assumption. It causes the loss to oscillate or diverge completely 
-      (resulting in NaN).
-    - Too Low: The algorithm takes minuscule steps, leading to painfully slow 
-      convergence and a high risk of getting trapped in a shallow local minimum 
-      or saddle point.
+4. CONDITIONING AND FEATURE SCALING
+--------------------------------------------------------------------------------
+Unscaled or correlated features turn the loss contours into long thin ellipses.
+One alpha serves every coordinate, so it is capped by the steepest direction
+while the flat direction crawls: the zig-zag. Cost scales with the condition
+number kappa = L/mu (largest over smallest curvature).
 
-Q2: Why do we shuffle the dataset before creating mini-batches?
-A2: Shuffling breaks any inherent order or bias in the data sequence. Without it 
-    (e.g., if all positive class samples appear first), successive mini-batch 
-    updates will pull weights in contradictory directions, leading to extreme 
-    cyclic oscillations and poor convergence.
+For linear regression the Hessian is X^T X, so
+  kappa(X^T X) = (sigma_max(X) / sigma_min(X))^2
+The squaring makes a mildly skewed design matrix a badly conditioned
+optimization problem; collinear features push sigma_min -> 0 and kappa -> huge.
+This is the optimization face of multicollinearity.
 
-Q3: Why does SGD struggle with saddle points, and how do modern variants fix it?
-A3: At a saddle point, the gradient is zero or near-zero along all axes, causing 
-    vanilla SGD to completely stall. Modern algorithms fix this by adding 
-    Momentum (incorporating past velocity to roll through flat regions) or using 
-    adaptive learning rates like Adam (scaling updates based on past gradient 
-    variance).
+Fixes, cheapest first:
+  - Standardize or min-max scale. Fit the scaler on train only.
+  - Mean-center: removes coupling between the bias term and the weights.
+  - PCA / whitening: decorrelates as well as rescales.
+  - Normalization layers (BatchNorm, LayerNorm): re-condition the problem at
+    every layer, mid-training. Much of their benefit is optimization, not
+    regularization.
+  - L2: adds lambda to every Hessian eigenvalue, so
+    kappa becomes (L+lambda)/(mu+lambda) - it speeds up training too.
+  - Adaptive optimizers (section 6) approximate per-coordinate rescaling;
+    second-order methods (section 10) are scale-invariant by construction.
 
-Q4: Explain the difference between a Local Minimum and a Saddle Point.
-A4: - At a Local Minimum, the gradient is zero, and all surrounding directions 
-      point upward (all eigenvalues of the Hessian matrix are positive). 
-    - At a Saddle Point, the gradient is also zero, but some directions point up 
-      while others point down (the Hessian has both positive and negative 
-      eigenvalues). Saddle points are far more common in high-dimensional deep 
-      learning landscapes.
+Interview point: the linear-regression solution is itself scale-invariant (the
+normal equation just gets numerically worse conditioned). The sensitivity
+belongs to the iterative solver, not the model. Trees split on thresholds, so
+they are unaffected by feature scale.
 
-Q5: How do L1 and L2 regularization affect the Gradient Descent update step 
-    mathematically?
-A5: - L2 Regularization (Weight Decay): Adds (lambda/2)*||theta||^2 to the loss. 
-      Its gradient is (lambda * theta). The update step becomes:
-      theta := theta * (1 - alpha * lambda) - alpha * grad_J_original(theta)
-      This continuously shrinks weights toward zero proportionally to their size.
-      
-    - L1 Regularization: Adds lambda*||theta||_1 to the loss. Its gradient is 
-      lambda * sign(theta). The update step becomes:
-      theta := theta - alpha * grad_J_original(theta) - alpha * lambda * sign(theta)
-      This subtracts a constant value regardless of weight magnitude, driving 
-      less important weights exactly to absolute 0, yielding model sparsity.
+
+5. MOMENTUM
+--------------------------------------------------------------------------------
+  v := beta * v + grad_J(theta)          beta = 0.9 typical
+  theta := theta - alpha * v
+
+- For a constant gradient the velocity saturates at grad/(1-beta), so momentum
+  multiplies the effective step by 1/(1-beta): 10x at beta=0.9, 100x at 0.99.
+  alpha and beta must therefore be tuned together.
+- Fixes three things at once: cancels the oscillating component of the zig-zag
+  while accumulating the consistent one; carries velocity through plateaus and
+  saddle points; averages out mini-batch noise.
+- Nesterov: evaluate the gradient at the look-ahead point theta - alpha*beta*v,
+  so the step brakes before overshooting instead of after. Small but essentially
+  free gain; SGD + Nesterov(0.9) is the standard CNN recipe.
+- Framework trap: PyTorch uses v := beta*v + grad (inflates the effective LR),
+  Keras uses v := beta*v + (1-beta)*grad (does not). The same beta behaves
+  differently across libraries.
+
+
+6. ADAPTIVE OPTIMIZERS
+--------------------------------------------------------------------------------
+One global alpha is wrong when coordinates differ in curvature or in update
+frequency (sparse embeddings vs dense layers). Adaptive methods keep
+per-parameter statistics and rescale each coordinate.
+
+AdaGrad
+  G := G + grad^2                            (running sum)
+  theta := theta - alpha * grad / (sqrt(G) + eps)
+  Rare features keep large effective steps - strong for sparse linear models
+  (CTR, bag-of-words). G only grows, so the effective LR decays monotonically to
+  zero and long deep-learning runs stall.
+
+RMSProp
+  E := rho * E + (1 - rho) * grad^2          rho = 0.9 (EMA, not a sum)
+  Fixes AdaGrad's stalling by forgetting old gradients.
+
+Adam = RMSProp + momentum + bias correction
+  m := b1*m + (1-b1)*g                       first moment  (direction)
+  v := b2*v + (1-b2)*g^2                     second moment (per-param scale)
+  m_hat = m / (1 - b1^t) ;  v_hat = v / (1 - b2^t)
+  theta := theta - alpha * m_hat / (sqrt(v_hat) + eps)
+
+  Defaults: b1=0.9, b2=0.999, eps=1e-8, alpha=1e-3 (3e-4 to 1e-4 for
+  Transformers). b2=0.999 implies a ~1000-step averaging window.
+  Bias correction is needed because m and v start at zero and warm up at very
+  different speeds; without it the early updates are badly mis-scaled.
+  The update size is roughly capped at alpha, which makes Adam robust to badly
+  scaled gradients - the reason it dominates NLP.
+
+AdamW - the current default
+  theta := theta - alpha * m_hat/(sqrt(v_hat)+eps)        (data gradient only)
+  theta := theta - alpha * wd * theta                     (decoupled decay)
+  L2 added inside the Adam loss is divided by sqrt(v_hat), so heavily-updated
+  weights receive less decay. Decoupling makes decay uniform; decay values are
+  not transferable between Adam and AdamW.
+
+Also worth naming: LARS/LAMB apply a per-layer trust ratio
+||theta||/||update|| and are what makes very large batch training work;
+Adafactor and 8-bit Adam shrink optimizer state for large models.
+
+Optimizer state and memory:
+
+  Optimizer         Extra state   Handles bad scaling   Note
+  ----------------  ------------  --------------------  ---------------------
+  SGD               none          no                    needs scaled features
+  SGD + momentum    1x params     partly                best CNN accuracy
+  AdaGrad           1x params     yes (sparse)          LR decays to zero
+  RMSProp           1x params     yes                   no momentum term
+  Adam / AdamW      2x params     yes                   robust default
+  LARS / LAMB       2x params     yes                   huge-batch training
+  L-BFGS            m x params    yes (curvature)       full-batch only
+
+Mixed-precision training costs about 16 bytes per parameter with Adam:
+2 (fp16 weight) + 2 (fp16 grad) + 4 (fp32 master weight) + 4 (m) + 4 (v).
+A 7B model therefore needs ~112 GB of training state, which is why ZeRO/FSDP
+sharding exists (section 12).
+
+Adam vs SGD in one line: Adam trains faster and tolerates bad gradient scaling;
+SGD + momentum often generalizes slightly better on CNNs. Transformers
+effectively require AdamW.
+
+
+7. LEARNING RATE SCHEDULES AND TUNING
+--------------------------------------------------------------------------------
+Principle: large steps early to travel, small steps late to settle inside the
+noise ball.
+
+  Step decay            x0.1 at fixed milestones. Simple, still strong.
+  Cosine annealing      smooth decay to ~0; default for vision and LLMs.
+  Linear + warmup       standard LLM pretrain/finetune recipe.
+  One-cycle             ramp up to a large peak then down; the large mid-run
+                        LR acts as a regularizer.
+  Inverse sqrt          original Transformer schedule; step-budget agnostic.
+  ReduceLROnPlateau     reactive; use when the step budget is unknown.
+
+Warmup (ramp alpha from ~0 over the first few hundred to few thousand steps) is
+needed because Adam's v_hat is a high-variance estimate early on, and because
+the surface at initialization is badly conditioned - one oversized early step is
+unrecoverable. Mandatory for Transformers and for large-batch training.
+
+LR range test: run a few hundred steps with alpha rising exponentially, plot
+loss vs alpha, and pick roughly one order of magnitude below the blow-up point.
+Cheap, and far better than guessing.
+
+Coupling with batch size: alpha ~ B for SGD/momentum (linear scaling rule),
+alpha ~ sqrt(B) for Adam-family. Both break down past the critical batch size,
+where extra samples no longer improve gradient quality.
+
+Tuning order (what to say when asked how you would tune this):
+  1. Overfit a single mini-batch to ~zero loss - validates the whole pipeline.
+  2. Find alpha with a range test; search on a log scale, factors of 3.
+  3. Pick B for hardware utilization, then rescale alpha.
+  4. Add a schedule, plus warmup if using Adam or large batches.
+  5. Only then tune weight decay, momentum/b1, b2, eps.
+Everything after alpha is second order.
+
+
+8. GRADIENT PATHOLOGIES AND NUMERICAL STABILITY
+--------------------------------------------------------------------------------
+Vanishing gradients: repeated multiplication by small Jacobians (saturated
+sigmoid/tanh, depth, long sequences) shrinks the gradient toward zero, so early
+layers stop learning. Fixes: ReLU-family activations, residual/skip connections,
+normalization layers, He init (ReLU) or Xavier/Glorot init (tanh), LSTM/GRU
+gating.
+
+Exploding gradients: the same product blowing up; loss spikes then goes NaN.
+Fixes: clipping, lower alpha, normalization, better init.
+
+Gradient clipping: prefer global norm, g := g * min(1, c/||g||) with c ~ 1.0,
+because it rescales the whole gradient and preserves the step direction. Value
+clipping truncates only the large coordinates and distorts direction. Standard
+for RNNs, Transformers and RL. If it fires on most steps, alpha is too high.
+
+NaN / Inf causes, in order of likelihood:
+  1. alpha too high -> weights explode -> Inf -> Inf - Inf = NaN.
+  2. log(0) in cross-entropy -> compute the loss from logits (log-sum-exp).
+  3. exp overflow in softmax/sigmoid -> subtract the max logit, clip inputs.
+  4. division by ~0: zero-variance feature, empty cluster, missing eps.
+  5. fp16 overflow (max 65504) without loss scaling.
+Diagnose by logging the gradient norm each step and finding the last finite one.
+
+Mixed precision: fp16 underflows small gradients, so dynamic loss scaling
+multiplies the loss by S before backward and unscales the gradients before the
+update; bf16 keeps fp32's exponent range and usually needs none. Keep an fp32
+master copy of the weights so tiny updates are not lost to rounding.
+
+Gradient checking (essential for from-scratch implementations):
+  numeric_i = (J(theta + eps*e_i) - J(theta - eps*e_i)) / (2*eps)
+  rel_err   = ||numeric - analytic|| / (||numeric|| + ||analytic||)
+Use the two-sided form, eps ~ 1e-4 to 1e-7 in float64; rel_err < 1e-7 is
+correct, > 1e-2 is a bug. Disable dropout first and check a random subset of
+coordinates.
+
+Dead ReLU: one large update pins a unit negative and its gradient stays exactly
+zero forever. Lower alpha, LeakyReLU/GELU, sane init.
+
+
+9. NON-DIFFERENTIABLE OBJECTIVES
+--------------------------------------------------------------------------------
+|theta| has no derivative at 0 - the subgradient there is any value in [-1, 1].
+Consequence: plain SGD on a Lasso objective produces tiny weights, not zeros,
+because the constant alpha*lambda step makes weights jitter in a band around 0.
+
+Proximal gradient step (ISTA) - the correct fix. Gradient step on the smooth
+part, then soft-threshold:
+  z := theta - alpha * grad_J_smooth(theta)
+  theta := sign(z) * max(|z| - alpha*lambda, 0)
+Everything inside the threshold band collapses to exactly zero, which is what
+actually produces sparsity.
+
+Coordinate descent: minimize one coordinate at a time; for Lasso each 1-D
+subproblem is that same closed-form soft-threshold. This is what scikit-learn's
+Lasso and ElasticNet use, and it has no learning rate to tune.
+
+Other non-smooth losses needing the same care: hinge (SVM), MAE, quantile.
+ReLU's subgradient at 0 is conventionally taken as 0 by every framework.
+
+
+10. SECOND-ORDER METHODS
+--------------------------------------------------------------------------------
+Newton: theta := theta - H^-1 * grad. Effectively a per-direction learning rate
+of 1/eigenvalue, so it is scale-invariant and immune to the kappa problem, and
+converges quadratically near the optimum. Costs O(d^2) memory and O(d^3) per
+step, and the step moves uphill when H has negative eigenvalues.
+
+  IRLS  Newton for logistic regression, H = X^T W X with W = diag(p(1-p)).
+        What sklearn's lbfgs / newton-cg do: ~10 iterations, not thousands.
+  L-BFGS  approximates H^-1 from the last m (5-20) gradient differences,
+        O(m*d) memory. Best for small/medium, full-batch, deterministic convex
+        problems; breaks on noisy mini-batch gradients.
+  Gauss-Newton / Levenberg-Marquardt  H ~ J^T J for least squares; LM damps
+        toward gradient descent when the quadratic model is poor. Curve fitting.
+
+Why deep learning stays first-order: mini-batch curvature estimates are far too
+noisy, O(d^2) is impossible at billions of parameters, negative curvature makes
+Newton steps unsafe, and Adam plus normalization layers already recover most of
+the conditioning benefit for far less compute.
+
+
+11. BATCH SIZE, NOISE AND GENERALIZATION
+--------------------------------------------------------------------------------
+- Gradient variance scales as sigma^2/B: doubling B cuts noise only by sqrt(2).
+  Past the critical batch size, extra samples per step buy almost nothing.
+- Large-batch generalization gap: fewer, smoother steps let the model settle in
+  sharper minima. Mitigate with the linear scaling rule, warmup, and LARS/LAMB.
+- Flat vs sharp minima: train and test surfaces are slightly shifted relative to
+  each other, so a wide basin degrades less under that shift. SGD noise is the
+  standard explanation for why small batches and large mid-run LRs generalize
+  better. (Sharpness is reparameterization-dependent, so this is an empirical
+  story, not a theorem.)
+- Gradient accumulation: run k micro-batches, average their gradients, take one
+  step - emulates batch k*B under a memory limit. Divide the loss by k, and note
+  BatchNorm statistics are still per micro-batch (LayerNorm is unaffected).
+- Weight averaging, cheap accuracy: EMA of weights
+  (theta_ema := d*theta_ema + (1-d)*theta, d ~ 0.999) or SWA (average the last
+  epochs of a cyclic schedule). Recompute BatchNorm statistics afterwards.
+
+
+12. DISTRIBUTED TRAINING
+--------------------------------------------------------------------------------
+Data parallelism: the model fits on one GPU. Split the mini-batch across
+devices, compute local gradients, All-Reduce to average them, then update. The
+default; scales until the global batch grows past what is useful (section 11).
+
+Model parallelism, when the model does not fit:
+  - Tensor parallel: slice weight matrices within a layer; needs NVLink-class
+    interconnect because activations cross devices every layer.
+  - Pipeline parallel: slice sequential layers across devices; 1F1B scheduling
+    interleaves forward and backward passes to shrink idle "bubbles".
+
+State sharding (ZeRO / FSDP): partition optimizer state, gradients and
+parameters across ranks. This is the practical answer to the 16 bytes/param
+problem in section 6.
+
+Large-batch recipe: linear LR scaling + warmup + LARS/LAMB.
+
+
+13. DIAGNOSTICS AND DEBUGGING
+--------------------------------------------------------------------------------
+Log every step: training loss (per step, not per epoch - epoch averages hide
+spikes), global gradient norm, update-to-weight ratio
+||alpha*update||/||theta|| (healthy around 1e-3), and the current LR to confirm
+the schedule fires. Log the validation metric per epoch.
+
+Stopping criteria:
+  - fixed epoch/iteration budget (what most scratch implementations use)
+  - |J_t - J_{t-1}| < tol, or ||theta_t - theta_{t-1}|| < tol
+  - ||grad|| < tol: theoretically right, useless with mini-batch noise
+  - early stopping on validation with patience: the only criterion aimed at
+    generalization rather than at optimization
+
+  Symptom                          Likely cause
+  -------------------------------  -------------------------------------------
+  NaN after a few steps            alpha too high, or log(0)/overflow (sec 8)
+  Loss oscillates, no downtrend    alpha too high, or batch too small
+  Loss falls very slowly           alpha too low, or features unscaled (sec 4)
+  Loss flat from step 0            broken gradient path, or dead units
+  Loss drops then plateaus high    LR decayed too early, or underfitting
+  Sudden drop at a schedule step   normal: leaving the noise ball (sec 3)
+  Train loss down, val loss up     overfitting, not an optimization issue
+  Spiky loss on Transformers       needs warmup, clipping, or lower b2
+
+Debug in this order:
+  1. Overfit a single mini-batch to ~zero loss. If that fails, the bug is in the
+     model, loss, or data plumbing - never tune hyperparameters first.
+  2. Check gradients numerically (section 8) on a tiny input.
+  3. Verify input scaling and label encoding.
+  4. Only then touch alpha, schedule, batch size, regularization.
+
+
+14. WHEN NOT TO USE GRADIENT DESCENT
+--------------------------------------------------------------------------------
+  - Closed form exists and d is small: the normal equation
+    theta = (X^T X)^-1 X^T y is exact at O(d^3). Prefer GD when d or m is large,
+    when X^T X is singular, or when updates must be online.
+  - A specialized solver exists: SMO/QP for kernel SVM, coordinate descent for
+    Lasso, IRLS or L-BFGS for GLMs. They beat GD on their own problem class.
+  - The objective is not differentiable in the parameters: trees choose splits
+    greedily by impurity. Gradient boosting uses gradients w.r.t. predictions,
+    not w.r.t. tree structure - a favourite interview distinction.
+  - Parameters are discrete or combinatorial: feature subsets, k in KMeans,
+    architecture choices.
+  - Latent variables with closed-form steps: EM (KMeans is hard-assignment EM).
+  - Hyperparameters: no usable gradient, so use random search, Bayesian
+    optimization, or Hyperband.
+
+
+15. OPTIMIZER SELECTION CHEAT-SHEET
+--------------------------------------------------------------------------------
+  Problem                         Recipe
+  ------------------------------  --------------------------------------
+  Linear / logistic regression    closed form or L-BFGS
+  Lasso / ElasticNet              coordinate descent or proximal GD
+  Kernel SVM                      SMO / QP solver
+  Large sparse linear (CTR)       SGD or AdaGrad/FTRL, single pass
+  CNN from scratch                SGD + Nesterov 0.9 + cosine + wd 5e-4
+  Transformer pretrain/finetune   AdamW + warmup + cosine, clip 1.0
+  Very large batch (>8k)          LARS/LAMB + linear LR scaling + warmup
+  Embeddings / recommenders       Adam or AdaGrad (sparse-aware)
+  Reinforcement learning          Adam, alpha ~ 1e-4, clip, lower b2
+  Memory-constrained LLM          Adafactor / 8-bit Adam / ZeRO-FSDP
+  Small full-batch convex         L-BFGS with line search
+
+Default when picking blind: AdamW, alpha = 3e-4, warmup 5% of steps, cosine
+decay, gradient clipping at 1.0 - then run an LR range test.
+
+
+16. INTERVIEW Q&A
+--------------------------------------------------------------------------------
+Q1: What happens if the learning rate is too high or too low, and is there a
+    formal limit?
+A1: Too high overshoots the minimum, so the loss oscillates or diverges to NaN;
+    too low crawls, wastes compute, and can stall on a plateau. Formally, for an
+    L-smooth loss (L = largest Hessian eigenvalue) GD is stable only for
+    alpha < 2/L, with alpha = 1/L optimal - so the usable range is a property of
+    your data's curvature, not a universal constant. In practice you find it
+    with an LR range test rather than by estimating L.
+
+Q2: Why shuffle the dataset before creating mini-batches?
+A2: Shuffling breaks any ordering in the data. If the file is sorted by label,
+    consecutive batches contain a single class and pull the weights in
+    contradictory directions, giving cyclic oscillation and poor convergence.
+    Reshuffle every epoch; this also converges faster than sampling with
+    replacement.
+
+Q3: Local minimum vs saddle point - which actually blocks training?
+A3: At a local minimum the gradient is zero and all Hessian eigenvalues are
+    positive; at a saddle point the gradient is zero but the eigenvalues have
+    mixed signs, so some directions still descend. In high dimensions saddle
+    points and plateaus vastly outnumber bad local minima, and they are the real
+    stalling risk because plain GD sees grad ~ 0 and stops moving. Momentum
+    carries velocity through the flat region, Adam enlarges steps in
+    low-curvature directions, and mini-batch noise kicks the iterate off the
+    saddle.
+
+Q4: Batch GD has the better convergence rate. Why is mini-batch the default?
+A4: Rates are per iteration, and iterations cost very different amounts: batch
+    GD pays O(m) per step and SGD pays O(1), so on large data SGD makes
+    thousands of updates in the time batch GD makes one and reaches a useful
+    loss much sooner. Mini-batches then add what the rates ignore: B in the
+    32-512 range saturates GPU parallelism, keeps gradient variance moderate,
+    and retains enough noise to escape saddle points. High-precision
+    convergence, where batch methods genuinely win, is rarely what a learning
+    problem needs.
+
+Q5: Why is feature scaling critical for GD but irrelevant for decision trees?
+A5: GD applies the same alpha to every coordinate, so a feature 1000x larger
+    creates ~1000x larger curvature in its direction; the stable alpha is then
+    dictated by the steepest direction while the flat one crawls - the zig-zag.
+    Standardizing makes the contours near-circular so one alpha suits all
+    coordinates. Trees split on thresholds (is x > t), which is invariant to any
+    monotone rescaling. Note the linear-regression solution is itself
+    scale-invariant: the sensitivity belongs to the solver, not the model.
+
+Q6: How do L1 and L2 change the update step?
+A6: L2 adds (lambda/2)*||theta||^2 whose gradient is lambda*theta, giving
+    theta := theta*(1 - alpha*lambda) - alpha*grad_J - a multiplicative shrink
+    proportional to weight size, which never reaches exactly zero. L1 adds
+    lambda*||theta||_1 whose subgradient is lambda*sign(theta), giving
+    theta := theta - alpha*grad_J - alpha*lambda*sign(theta) - a constant pull
+    regardless of magnitude, which drives unimportant weights to zero and yields
+    sparsity. L2 also adds lambda to every Hessian eigenvalue, so it improves
+    conditioning and speeds up optimization as well as regularizing.
+
+Q7: Plain SGD on a Lasso objective gives tiny weights, not exact zeros. Why?
+A7: |theta| is not differentiable at 0 - its subgradient there is the whole
+    interval [-1, 1] - so a fixed alpha*lambda step overshoots past zero and the
+    weight jitters in a band of width ~alpha*lambda instead of landing on it.
+    The fix is a proximal step: take the smooth gradient step, then
+    soft-threshold with sign(z)*max(|z| - alpha*lambda, 0), which collapses
+    everything inside the band to exactly zero. Coordinate descent solves that
+    same 1-D problem in closed form per feature, which is why sklearn's Lasso
+    uses it instead of GD.
+
+Q8: Momentum vs Nesterov momentum?
+A8: Momentum keeps a velocity v = beta*v + grad and steps along it, amplifying
+    consistent directions and cancelling oscillating ones; because the effective
+    step is multiplied by 1/(1-beta), alpha and beta must be tuned together.
+    Nesterov takes the gradient at the look-ahead point theta - alpha*beta*v,
+    so it brakes before overshooting rather than after. The practical gain is
+    small but free; SGD + Nesterov(0.9) is the standard CNN recipe.
+
+Q9: Why does Adam need bias correction?
+A9: m and v are EMAs initialized at zero, so early estimates are biased toward
+    zero - after one step m = 0.1*g. Dividing by (1 - b1^t) and (1 - b2^t) makes
+    them unbiased. It matters because the two moments warm up at very different
+    speeds (b1=0.9 is a ~10-step window, b2=0.999 a ~1000-step one), so without
+    correction the sqrt(v) denominator is far too small early and the first
+    updates are huge and erratic - which is also why Adam benefits from warmup.
+
+Q10: Is L2 regularization the same as weight decay?
+A10: In plain SGD yes: adding lambda*theta to the gradient equals multiplying
+     theta by (1 - alpha*lambda). In Adam no: the lambda*theta term passes
+     through the adaptive denominator, so parameters with large historical
+     gradients get divided by a large sqrt(v_hat) and receive less decay, which
+     couples regularization strength to gradient magnitude. AdamW decouples them
+     by applying -alpha*wd*theta outside the adaptive step, which is why decay
+     values are not transferable between Adam and AdamW.
+
+Q11: Adam converges faster. Why is SGD + momentum still used?
+A11: Adam is faster in training loss and tolerates bad scaling, but it
+     tends to land in sharper minima and generalize slightly worse, while SGD's
+     noise biases it toward flat basins. On vision CNNs, SGD + Nesterov + cosine
+     still tends to beat AdamW at equal budget. On Transformers the reverse
+     holds: gradient scales differ wildly across embeddings, attention and
+     LayerNorm parameters, and Adam's per-parameter normalization is what makes
+     training stable at all. Rule of thumb: adaptive when scales are
+     heterogeneous or tuning budget is low, SGD + momentum when you can tune.
+
+Q12: Why is AdaGrad still preferred for very sparse features?
+A12: It divides by the square root of the accumulated squared gradient per
+     parameter, so a feature that fires in one example out of a million keeps a
+     large effective step while frequent features are damped. That is exactly
+     right for high-dimensional sparse linear models such as CTR prediction or
+     bag-of-words, where the alternative is learning nothing about rare features
+     or diverging on frequent ones. Its monotonically decaying LR - fatal for
+     long deep runs - is harmless in a single-pass convex setting.
+
+Q13: Why does learning-rate warmup help, especially for Transformers?
+A13: Statistically, Adam's second moment is estimated from very few samples in
+     the first steps, so early adaptive steps are erratic. Geometrically, the
+     surface at initialization is badly conditioned and one oversized step is
+     unrecoverable. Warmup keeps early steps small until curvature and the
+     moment estimates settle, and it becomes mandatory with large batches, where
+     the linear scaling rule asks for an alpha that would diverge at step 0.
+
+Q14: You quadruple the batch size. What do you change?
+A14: Scale alpha up - linearly (4x) for SGD/momentum, roughly sqrt(4) = 2x for
+     Adam-family - and add or lengthen warmup so the larger step does not
+     diverge at initialization. Recompute any step-based schedule, since an
+     epoch now contains 4x fewer updates. Expect a generalization gap once you
+     go well past the critical batch size, where extra samples stop improving
+     gradient quality; LARS/LAMB or a batch-size ramp mitigate it.
+
+Q15: With a constant learning rate, does SGD reach the exact minimum?
+A15: No. It reaches a noise ball around the minimum whose radius grows with
+     alpha and with gradient variance sigma^2/B, then bounces there forever -
+     the flat noisy plateau in loss curves. Exact convergence needs decaying
+     steps satisfying sum(alpha_t) = infinity and sum(alpha_t^2) < infinity, for
+     example alpha_0/t. This is why decaying the LR late in training produces a
+     sudden visible drop in loss.
+
+Q16: Your loss goes NaN at step 300. How do you debug it?
+A16: Log the loss and global gradient norm every step and find the last finite
+     step. A norm already growing means alpha is too high or clipping is
+     missing. An instant jump from normal values points to a domain error:
+     log(0) in cross-entropy, exp overflow in softmax/sigmoid, division by a
+     zero-variance feature, or fp16 overflow without loss scaling. Fix by
+     computing the loss from logits, adding eps inside logs, clipping sigmoid
+     inputs, and checking the inputs for NaN/Inf - then reproduce with
+     a fixed seed on one batch before changing anything else.
+
+Q17: When do you clip gradients, and by norm or by value?
+A17: Clip when the architecture can emit occasional huge gradients - RNNs over
+     long sequences, Transformers, RL with high-variance returns - or when you
+     see rare loss spikes. Prefer global-norm clipping, g := g*min(1, c/||g||)
+     with c ~ 1.0, because it rescales the whole gradient and preserves the step
+     direction, whereas value clipping truncates only the large coordinates and
+     distorts direction. It is a safety net: if it fires on most steps, alpha is
+     simply too high.
+
+Q18: Is gradient accumulation over k micro-batches identical to one batch of
+     k*B?
+A18: For the gradient, yes - provided you average, or divide the loss by k,
+     otherwise the effective LR is k times too large. Not identical in
+     practice: BatchNorm computes statistics per micro-batch, and any loss that
+     is non-linear across the batch (contrastive losses, batch-level metrics)
+     does not decompose. LayerNorm models are unaffected, which is why this
+     is the standard trick for training large models on small GPUs.
+
+Q19: Newton's method converges quadratically. Why is it not used in deep
+     learning?
+A19: Cost - the Hessian is O(d^2) to store and O(d^3) to invert, hopeless at
+     billions of parameters. Noise - mini-batch curvature estimates are far
+     noisier than gradient estimates. Non-convexity - with negative eigenvalues,
+     and saddle points are everywhere in high dimensions, the Newton step can
+     move uphill. Cheaper surrogates get most of the benefit: Adam is a crude
+     diagonal preconditioner and normalization layers re-condition the surface
+     directly. L-BFGS remains the right tool for small, deterministic,
+     full-batch problems.
+
+Q20: Training loss drops fast then plateaus well above zero. Optimization
+     problem or modeling problem?
+A20: Separate them by experiment. Try to overfit a single mini-batch: if it will
+     not reach ~zero loss, the problem is optimization or plumbing - dead units,
+     vanishing gradients, an LR decayed to nothing, a detached gradient path. If
+     it can, but the full training set plateaus, you are underfitting and need
+     more capacity, better features, or less regularization. Also check whether
+     the schedule decayed alpha too early, and whether the plateau is just the
+     SGD noise floor - drop the LR once and see if the loss steps down.

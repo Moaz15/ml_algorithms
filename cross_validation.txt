@@ -1,11 +1,6 @@
 CROSS-VALIDATION: SCHEMES, PITFALLS, NESTED CV, AND INTERVIEW Q&A
 ================================================================================
-
-ML_Lifecycle/theory/04_data_splitting_validation.txt covers this as a process
-step in the lifecycle. This note is the concept-and-pitfalls version: what the
-CV estimate actually estimates, how each scheme differs, and the ways it lies.
-
---------------------------------------------------------------------------------
+-------------------------------------------------------------------------------
 1. WHAT WE ARE TRYING TO ESTIMATE
 --------------------------------------------------------------------------------
 

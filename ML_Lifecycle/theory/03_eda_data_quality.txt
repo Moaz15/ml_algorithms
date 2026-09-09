@@ -1,230 +1,345 @@
 STAGE 3: DATA CLEANING AND EXPLORATORY DATA ANALYSIS
 ================================================================================
 
-Scope note: mechanics of imputation, outlier treatment, encoding and scaling
-live in ../../FeatureEngineering/theory/. This file covers what EDA is FOR, the
-quality checks that belong in a pipeline rather than a notebook, and the
-diagnostics (distributions, correlation, multicollinearity, leakage) that decide
-what you do next.
+PART A - THE FRAMEWORK
+================================================================================
 
+Why passes, and why this order. Each pass depends on the one before it. You
+cannot judge a distribution before you know the grain, and you must not look at
+relationships before you have split. Working out of order is how people quietly
+leak the test set or spend a day analysing a column that turns out to be a
+join artefact.
+
+Each pass has the same shape:
+
+    GOAL      the one question the pass answers
+    RUN       what you actually execute
+    DECIDE    the judgement the output forces
+    GATE      what must be true before moving on
+
+Time-box the whole thing. A first full sweep should take hours, not a week. The
+purpose is to decide what to do next, not to produce a beautiful notebook.
+
+
+PASS 0 - WRITE DOWN WHAT YOU EXPECT
 --------------------------------------------------------------------------------
-1. WHAT EDA IS ACTUALLY FOR
+GOAL      Commit to expectations before the data can anchor you.
+RUN       On one page, from the docs and domain owner, not the data:
+              what one row should represent (the grain)
+              roughly how many rows, over what date range
+              the target definition, and its expected base rate
+              which columns should never be null
+              which columns exist at PREDICTION time vs only after the outcome
+DECIDE    Nothing yet. This page is the yardstick for every later pass.
+GATE      You have written expectations you can be wrong about.
+
+Skipping this is the most common mistake. Without a prior, whatever the data
+says looks reasonable, and a 40% null rate reads as "just how it is" rather than
+as an incident.
+
+
+PASS 1 - CONTRACT AND GRAIN
 --------------------------------------------------------------------------------
+GOAL      Is this dataset what the documentation claims?
+RUN       row count vs expectation
+          per-day row count over time (a step change is an upstream incident)
+          uniqueness check on the claimed primary key
+          date range, timezone consistency, future-dated rows
+          referential integrity on join keys - orphan rate
+DECIDE    What IS one row? If the key is not unique, you have a different grain
+          than you think, and every aggregate below is wrong.
+GATE      Grain confirmed by a uniqueness test, not by belief.
 
-EDA is not "make plots". It answers five questions:
+Most join bugs are grain bugs. A fan-out that silently doubles rows will not
+throw an error; it will just make every subsequent statistic subtly wrong.
 
-    1. Is this dataset what the documentation claims it is? (schema, grain,
-       row counts, date ranges)
-    2. What is the GRAIN of a row - one row per what? Most join bugs are grain
-       bugs. Verify with a uniqueness check on the claimed key.
-    3. What is broken, missing or impossible, and is the brokenness random or
-       structured?
-    4. What is the shape of the target, and which features plausibly relate
-       to it?
-    5. Is anything too good to be true? (leakage detection)
 
-Do all of it on the TRAINING SPLIT only. Looking at the test set - even just
-plotting it - leaks information through your own decisions. If you must sanity-
-check the test set, check schema and row counts, not distributions or
-relationships to the target.
-
+PASS 2 - INTEGRITY SWEEP
 --------------------------------------------------------------------------------
-2. THE DATA QUALITY CHECKLIST (AUTOMATE THIS, DO NOT EYEBALL IT)
+GOAL      What is broken, missing, or impossible?
+RUN       Per column, mechanically:
+              dtype, and dtype stability across partitions
+              null rate, and null rate over time
+              cardinality (a categorical jumping 30 -> 30,000 levels is a bug)
+              domain violations: negative age, latitude > 90, price = 0
+              sentinel values posing as data: -1, 999, 0, "N/A", "", "unknown",
+                  1970-01-01, 9999-12-31
+              unit consistency: cents vs dollars, metres vs feet, ms vs s
+              string chaos: "US", "us", " US "
+              duplicates - exact, near, and by entity
+DECIDE    Which issues are fixable here, which need an upstream fix, and which
+          make a column unusable.
+GATE      Sentinels converted to NaN BEFORE any statistic is computed, and the
+          checks written as assertions in the pipeline - not cells in a
+          notebook. Each with a severity: fail the run, or warn and continue.
+
+This pass is automation, not judgement. If you are eyeballing it, it will not
+run again next month when the upstream schema changes.
+
+
+PASS 3 - DECIDE THE SPLIT, THEN SPLIT
 --------------------------------------------------------------------------------
+GOAL      Fence off the test set before you can learn anything from it.
+RUN       Ask three questions of what passes 1-2 revealed:
+              Is there a TIME structure? -> split by time, never randomly
+              Do rows share an ENTITY (user, device, patient)? -> split by
+                  entity, or the same person lands on both sides
+              Are rows GROUPED (sessions, images from one study)? -> group split
+          Deduplicate BEFORE splitting. Then split.
+DECIDE    The split strategy, which is the main input to stage 4.
+GATE      Everything from here runs on the TRAINING SPLIT ONLY.
 
-Per dataset:
-    - row count vs expectation, and per-day row count over time (a step change
-      is an upstream incident)
-    - primary key uniqueness; grain matches the documented grain
-    - referential integrity on join keys (orphan rate)
-    - date range, timezone consistency, future-dated rows
+This pass sits here deliberately. EDA on the full dataset leaks through your own
+decisions - the transform you choose, the outlier rule you set, the features you
+shortlist. You cannot un-see a distribution. If you must sanity-check the test
+set, check schema and row counts, never distributions or target relationships.
 
-Per column:
-    - dtype and dtype stability across partitions
-    - null rate, and null rate over time
-    - cardinality (a categorical that jumps from 30 to 30,000 levels is a bug)
-    - range/domain violations (negative age, latitude > 90, price = 0)
-    - sentinel values masquerading as data: -1, 999, 0, "N/A", "", "unknown",
-      1970-01-01, 9999-12-31. These must be converted to NaN BEFORE any
-      statistics are computed, or every mean you look at is wrong.
-    - unit consistency (cents vs dollars, metres vs feet, ms vs s) - usually
-      revealed by a bimodal histogram three orders of magnitude apart
-    - encoding/whitespace/case chaos in strings ("US", "us", " US ")
+See 04_data_splitting_validation.txt.
 
-Write these as assertions in the pipeline (Great Expectations, pandera, or plain
-asserts). Checks that live only in a notebook protect nothing. Each check needs
-a severity: fail the run vs warn and continue.
 
+PASS 4 - THE TARGET
 --------------------------------------------------------------------------------
-3. MISSING DATA: THE PART THAT IS ANALYSIS, NOT MECHANICS
---------------------------------------------------------------------------------
+GOAL      Understand what you are predicting before looking at any feature.
+RUN       Classification: class balance, and the rare-class COUNT (not the
+              percentage - 0.5% of 2,000 rows is 10 events)
+          Regression: full distribution, the tail, skew, zero-inflation, caps
+          Either: target rate over time - is it stationary?
+DECIDE    Predict y or log(y)? Is this severe imbalance? Is the target even
+          well-defined and consistently labelled?
+GATE      You can state the base rate and the naive baseline it implies.
 
-Classify the mechanism before choosing a fix:
+Do this before features. It sets the metric (08), the split (04), and often
+reveals that the labelling rule changed halfway through the history.
+
+
+PASS 5 - FEATURES ONE AT A TIME
+--------------------------------------------------------------------------------
+GOAL      Know the shape of each column on its own.
+RUN       Numeric: mean vs median gap, std, IQR, min/max, skew, kurtosis, a
+              histogram, and a quantile table at 1/5/25/50/75/95/99
+          Categorical: frequency table, cardinality, top-k share, rare-level
+              share, unseen-level risk at serving
+DECIDE    Which columns need transforming, bucketing, or dropping outright.
+GATE      Every column is either understood, queued for a transform, or
+          consciously dropped with a reason.
+
+The quantile table catches what mean and std hide: a spike at zero, truncation
+at a cap, a second mode. Read part B section 3 for what each shape implies.
+
+
+PASS 6 - RELATIONSHIPS
+--------------------------------------------------------------------------------
+GOAL      Which features plausibly carry signal, and which duplicate each other?
+RUN       Feature vs target, by type (part B section 4)
+          Feature vs feature: correlation matrix, then VIF for multi-way
+              collinearity a pairwise matrix misses
+DECIDE    A candidate feature shortlist, and which correlated groups need
+          collapsing before a linear model sees them.
+GATE      You can name your top candidate features and why.
+
+Weak marginal correlation is not proof a feature is useless - interactions do
+not show up here (XOR is the canonical case). Treat this as a shortlist, not a
+selection. See 05_feature_selection.txt.
+
+
+PASS 7 - INTERROGATE ANYTHING TOO GOOD
+--------------------------------------------------------------------------------
+GOAL      Find the leakage before it finds you in production.
+RUN       For every strong feature from pass 6, ask ONE question:
+              "Would this column hold this value in the database one second
+               BEFORE the prediction moment?"
+          Flag the usual suspects (part B section 6) and trace their lineage.
+DECIDE    Exclude, re-derive from a point-in-time snapshot, or keep with proof.
+GATE      No feature survives on "it works well" alone.
+
+Never accept a suspiciously good model. A validation score far better than any
+reasonable prior is a leakage report, not a success.
+
+
+PASS 8 - HAND OFF
+--------------------------------------------------------------------------------
+GOAL      Make the next stage possible without rerunning your notebook.
+RUN       Produce five artefacts:
+              1. data quality report - the automated checks and their status
+              2. data dictionary - column, meaning, source, grain, null rate,
+                 and availability at serving time
+              3. candidate feature shortlist with measured target relationships
+              4. confirmed leakage risks and how each is excluded
+              5. the split strategy implied by what you found
+DECIDE    Is the data good enough to model, or does something need an upstream
+          fix first?
+GATE      Someone else could pick up stage 4 from these five documents.
+
+
+================================================================================
+PART B - REFERENCE
+================================================================================
+
+1. MISSING DATA - MECHANISM BEFORE FIX
+--------------------------------------------------------------------------------
+Classify before choosing a treatment:
+
     MCAR  missingness independent of everything. Rare. Dropping rows is safe
           but wasteful.
-    MAR   missingness depends on OBSERVED features (income missing more often
-          for younger users). Model-based imputation conditioned on those
+    MAR   missingness depends on OBSERVED features - income missing more often
+          for younger users. Model-based imputation conditioned on those
           features is principled.
-    MNAR  missingness depends on the UNOBSERVED value itself (high earners
-          decline to state income). No imputation recovers it. The best move is
-          usually to keep the missingness as a feature.
+    MNAR  missingness depends on the UNOBSERVED value itself - high earners
+          decline to state income. No imputation recovers it; keep the
+          missingness as a feature.
 
 Practical consequences:
-    - Always add an `is_missing` indicator for non-trivial null rates. The fact
-      of missingness is frequently more predictive than the imputed value.
-    - Compare the target rate for missing vs present. A large gap means MNAR-ish
-      structure and possible leakage (the field may only be populated after the
-      outcome).
-    - Fit imputers on TRAIN ONLY and apply to val/test. A median computed over
-      the full dataset is leakage.
-    - Tree ensembles can handle missing natively (LightGBM/XGBoost learn a
-      default direction); linear models and neural nets cannot.
+  - Add an is_missing indicator for any non-trivial null rate. The FACT of
+    missingness is often more predictive than the imputed value.
+  - Compare the target rate for missing vs present. A large gap means MNAR-ish
+    structure, and possibly leakage - the field may only be populated after the
+    outcome.
+  - Fit imputers on TRAIN ONLY. A median over the full dataset is leakage.
+  - LightGBM and XGBoost learn a default direction for missing; linear models
+    and neural nets cannot.
 
-Mechanics: ../../FeatureEngineering/theory/missing_data.txt
 
+2. OUTLIERS - THREE KINDS, THREE RESPONSES
 --------------------------------------------------------------------------------
-4. OUTLIERS AND ANOMALIES: DECIDE WHAT THEY MEAN
---------------------------------------------------------------------------------
-
-Three kinds, three responses:
-    Data error      impossible values -> null them out and fix the pipeline
-    Rare-but-real   a genuine whale customer -> keep; winsorise or log-transform
+    Data error      impossible values -> null them and fix the pipeline
+    Rare but real   a genuine whale customer -> keep; winsorise or log-transform
                     if the model is sensitive, never silently delete
-    The signal      in fraud/failure detection the outliers ARE the target ->
+    The signal      in fraud and failure detection the outliers ARE the target;
                     deleting them deletes the problem
 
 Detection: z-score only if roughly normal; IQR fences as a robust default;
 modified z-score with MAD for heavy tails; Mahalanobis or Isolation Forest for
-multivariate outliers that are unremarkable in every single dimension.
-See ../../FeatureEngineering/theory/outliers.txt and Ensemble_Learning/ for
-Isolation Forest.
+multivariate outliers that look unremarkable in every single dimension.
 
-Sensitivity matters: linear regression, k-means and PCA are dominated by
-extremes; tree splits and rank-based methods barely notice them.
+Sensitivity differs by model: linear regression, k-means and PCA are dominated
+by extremes; tree splits and rank-based methods barely notice them.
+See ../../FeatureEngineering/theory/outliers.txt.
 
+
+3. WHAT DISTRIBUTION SHAPES IMPLY
 --------------------------------------------------------------------------------
-5. DUPLICATES AND NOISE
+    Heavy right skew    revenue, counts, durations -> log1p or Box-Cox for
+                        linear models; irrelevant for trees
+    Multimodal          a latent segment is hiding in the column -> add a
+                        segment feature, or model segments separately
+    Spike at zero       zero-inflated -> model in two parts: did it happen, and
+                        how much given that it did
+    Hard cap or floor   censoring. Treating a censored value as observed biases
+                        everything; consider survival methods
+
+For duplicates and noise:
+    Exact duplicates       often a re-delivered event or a join fan-out. Check
+                           the join first - deduplicating the symptom hides a
+                           broken pipeline.
+    Near duplicates        same entity, different formatting. Fuzzy matching,
+                           MinHash, embeddings.
+    Cross-split duplicates THE dangerous one. The same record in train and test
+                           inflates your score and no amount of cross-validation
+                           reveals it. This is why pass 3 deduplicates first.
+    Bots and automation    a heavy right tail in events per user; strip before
+                           computing behavioural aggregates.
+
+Label noise is fixed by better guidelines and overlap measurement, feature noise
+by smoothing or longer aggregation windows. Some noise is irreducible - the
+sigma^2 term in ../../bias_variance.txt.
+
+
+4. CHOOSING A RELATIONSHIP MEASURE
 --------------------------------------------------------------------------------
+    numeric - numeric        Pearson (linear), Spearman (monotonic, rank-based,
+                             robust to outliers and skew), scatter + smoother
+    numeric - categorical    group means/medians, box plots, ANOVA F, eta-sq
+    categorical - categorical  contingency table, chi-square, Cramer's V
+    non-linear               mutual information, or the gain from a
+                             single-feature gradient boosted stump
 
-    Exact duplicates      often a re-delivered event or a bad join fan-out.
-                          Check the join first - deduplicating the symptom hides
-                          a broken pipeline.
-    Near duplicates       same entity, different formatting; retweets, scraped
-                          mirrors. Use fuzzy matching / MinHash / embeddings.
-    Cross-split duplicates  THE dangerous one. The same record in train and test
-                          gives you an inflated score that no amount of
-                          cross-validation reveals. Deduplicate BEFORE splitting,
-                          and split by entity (see 04_data_splitting_validation).
-    Bots and automation   heavy right tail in event counts per user; strip
-                          before computing behavioural aggregates.
+Caveats worth saying out loud in an interview: Pearson sees only linear
+structure (Anscombe's quartet), correlation is not causation, and a feature
+uncorrelated with the target alone can be highly useful in interaction with
+another.
 
-Noise: label noise (fix the guideline, use overlap), feature noise (smoothing,
-aggregation over longer windows), and quantisation artefacts. Some noise is
-irreducible error - the sigma^2 term in ../../bias_variance.txt.
 
+5. MULTICOLLINEARITY
 --------------------------------------------------------------------------------
-6. UNIVARIATE ANALYSIS
---------------------------------------------------------------------------------
-
-Numeric: mean vs median gap (skew), std, IQR, min/max, skewness, kurtosis, and
-always a histogram plus a quantile table (1, 5, 25, 50, 75, 95, 99). The
-percentile table catches what mean/std hide: spikes at zero, truncation at a
-cap, a second mode.
-
-What the shapes tell you:
-    Heavy right skew (revenue, counts, durations) -> log1p or Box-Cox for
-        linear models; irrelevant for trees.
-    Multimodal        -> a latent segment is hiding in the column; consider a
-        segment feature or separate models.
-    Spike at zero     -> zero-inflated; model as two parts (did it happen? how
-        much given it happened?).
-    Hard cap / floor  -> censoring. Treating a censored value as observed biases
-        everything; consider survival methods.
-
-Categorical: frequency table, cardinality, share of the top-k levels, share of
-rare levels (candidates for an "other" bucket), unseen-level risk at serving.
-
-Target: class balance (see ../../handling_imbalanced_data.txt), or for
-regression the distribution and its tail. If the target is skewed, decide early
-whether you predict y or log(y) - it changes the loss you are implicitly
-minimising and the metric that makes sense.
-
---------------------------------------------------------------------------------
-7. BIVARIATE AND CORRELATION ANALYSIS
---------------------------------------------------------------------------------
-
-    numeric-numeric      Pearson (linear), Spearman (monotonic, rank-based,
-                         robust to outliers and skew), scatter with a smoother
-    numeric-categorical  group means/medians, box plots, ANOVA F, eta-squared
-    categorical-categorical  contingency table, chi-square, Cramer's V
-    non-linear           mutual information, or the gain from a single-feature
-                         gradient boosted stump ensemble
-
-Correlation caveats worth saying out loud in an interview: Pearson only sees
-linear structure (Anscombe's quartet), correlation is not causation, and a
-feature uncorrelated with the target in isolation can still be highly useful in
-interaction with another (XOR is the canonical case). This is why filter-only
-feature selection is weak - see 05_feature_selection.txt.
-
---------------------------------------------------------------------------------
-8. MULTICOLLINEARITY
---------------------------------------------------------------------------------
-
-Definition: one feature is (nearly) a linear combination of others, so X^T X is
-near-singular.
+One feature is nearly a linear combination of others, so XᵀX is near-singular.
 
 Detection:
-    - correlation matrix > |0.8| pairs (catches pairwise only)
-    - VIF_j = 1 / (1 - R_j^2), where R_j^2 comes from regressing feature j on
-      all others. VIF > 5 is suspicious, > 10 is severe. VIF catches multi-way
-      collinearity that a pairwise matrix misses.
-    - condition number of the scaled design matrix (> 30 is a warning)
+  - correlation matrix, |r| > 0.8 pairs - catches pairwise only
+  - VIF_j = 1 / (1 - R_j²), from regressing feature j on all others. Above 5 is
+    suspicious, above 10 severe. Catches multi-way collinearity a pairwise
+    matrix misses.
+  - condition number of the scaled design matrix - above 30 is a warning
 
 Consequences:
-    - Coefficient VARIANCE explodes; signs flip between refits or CV folds.
-      Coefficients become uninterpretable and unstable.
-    - Predictive accuracy is usually FINE. Collinearity hurts inference, not
-      prediction, as long as the collinearity structure holds at serving time.
-    - Feature-importance mass gets split arbitrarily between correlated
-      features, so "unimportant" is not "useless" (see 09_interpretability).
+  - Coefficient VARIANCE explodes; signs flip between refits and CV folds, and
+    coefficients stop being interpretable.
+  - Predictive accuracy is usually FINE, as long as the collinearity structure
+    still holds at serving time. It hurts inference, not prediction.
+  - Feature-importance mass splits arbitrarily between correlated features, so
+    "unimportant" is not "useless" (09_interpretability.txt).
 
-Fixes: drop one of the pair, combine them (ratio, sum, difference), PCA on the
-correlated block (loses interpretability), or L2 regularisation - ridge is the
-canonical answer because it shrinks correlated coefficients together and
-stabilises the solution. See ../../regularization_concept.txt. Perfect
-collinearity from one-hot encoding (the dummy trap) is a special case: drop one
-level for linear models with an intercept.
+Fixes: drop one, combine them (ratio, sum, difference), PCA on the correlated
+block (loses interpretability), or L2 regularisation - ridge shrinks correlated
+coefficients together and is the canonical answer. Perfect collinearity from
+one-hot encoding is the dummy trap: drop one level for linear models with an
+intercept. See ../../regularization_concept.txt.
 
-Trees are largely immune to collinearity for prediction, but their split-based
-importances are diluted by it.
+Trees are largely immune for prediction, though their split-based importances
+are still diluted.
 
+
+6. LEAKAGE RED FLAGS
 --------------------------------------------------------------------------------
-9. LEAKAGE DETECTION DURING EDA
---------------------------------------------------------------------------------
+In rough order of how often they turn out to be real leakage:
+  - a single feature with AUC > 0.95 on its own
+  - a validation score far better than any reasonable prior
+  - a column named "final", "total", "closed", "reason", "status", "resolved",
+    "amount_refunded"
+  - a null rate that differs enormously between classes
+  - an ID or timestamp with strong predictive power - rows were sorted by
+    outcome, or the ID encodes the collection batch
 
-Red flags, in order of how often they turn out to be leakage:
-    - a single feature with AUC > 0.95 on its own
-    - a validation score dramatically better than any reasonable prior
-    - a feature whose name contains "final", "total", "closed", "reason",
-      "status", "resolved", "amount_refunded"
-    - a feature whose null rate differs enormously between classes
-    - an ID or timestamp with strong predictive power (rows were sorted by
-      outcome; the ID encodes the collection batch)
+The test is always the same: would this value have existed, with this value, one
+second before prediction time? If you cannot answer with certainty, trace the
+lineage. See 04_data_splitting_validation.txt for the full leakage taxonomy.
 
-The test: for each suspect feature ask "would this value, with this value, have
-existed in the database one second before the prediction time?" If you cannot
-answer with certainty, trace its lineage. Do not accept a suspiciously good
-model. See also 04_data_splitting_validation.txt section on leakage taxonomy.
 
---------------------------------------------------------------------------------
-10. WHAT TO PRODUCE AT THE END OF STAGE 3
---------------------------------------------------------------------------------
+================================================================================
+PART C - PORTABLE CHECKLIST
+================================================================================
 
-    - a data quality report with the automated checks and their status
-    - a data dictionary: column, meaning, source, grain, null rate, availability
-      at serving time
-    - a shortlist of candidate features with their measured relationship to the
-      target
-    - a list of confirmed leakage risks and how they are being excluded
-    - the split strategy implied by what you found (entity leakage? time
-      structure? group structure?) - the input to stage 4
+Copy this into any project and work down it.
+
+    [ ] 0  Expectations written down before opening the data
+    [ ] 1  Row count, date range, per-day volume vs expectation
+    [ ] 1  Primary key unique; grain confirmed by test
+    [ ] 1  Join keys checked for orphans
+    [ ] 2  dtypes, null rates, cardinality per column
+    [ ] 2  Sentinels converted to NaN before any statistic
+    [ ] 2  Domain and unit violations checked
+    [ ] 2  Duplicates found: exact, near, per entity
+    [ ] 2  Checks written as pipeline assertions, each with a severity
+    [ ] 3  Time / entity / group structure identified
+    [ ] 3  Deduplicated, then split. Test set fenced off.
+    [ ] 4  Target distribution, base rate, rare-class COUNT
+    [ ] 4  Target stability over time checked
+    [ ] 4  Transform decision made (y vs log y)
+    [ ] 5  Quantile table and histogram per numeric column
+    [ ] 5  Frequency and rare-level share per categorical
+    [ ] 6  Feature-target relationships measured by correct test
+    [ ] 6  Correlation matrix and VIF computed
+    [ ] 7  Every strong feature passed the point-in-time question
+    [ ] 7  Suspicious columns traced to their source
+    [ ] 8  Data quality report
+    [ ] 8  Data dictionary with serving-time availability
+    [ ] 8  Candidate feature shortlist
+    [ ] 8  Leakage risks documented with mitigations
+    [ ] 8  Split strategy handed to stage 4
+
+Stop rules - EDA is done when:
+  - every column is understood, queued for a transform, or dropped with reason
+  - the quality checks run in the pipeline rather than in your notebook
+  - you can state the baseline and the metric you will be judged on
+  - nothing left is "too good to be true" and unexplained
+
+It is NOT done when you are still making plots because they are interesting.

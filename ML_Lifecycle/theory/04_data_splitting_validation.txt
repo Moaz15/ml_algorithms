@@ -27,24 +27,6 @@ the confidence interval you need: to distinguish 90% from 91% accuracy you need
 on the order of 10k test examples.
 
 --------------------------------------------------------------------------------
-2. CHOOSING THE SPLIT STRATEGY
---------------------------------------------------------------------------------
-
-Ask one question: "what does the model have to generalise ACROSS at serving
-time?" Split along exactly that axis.
-
-    New rows from the same population   -> random split
-    Future time periods                 -> time-based split
-    New users / patients / devices      -> group (entity) split
-    New locations / stores / languages  -> group split on that key
-    Rare classes                        -> stratified split
-    Combination                         -> grouped + time (most real systems)
-
-Random split when the data is temporal or grouped is the classic disaster: the
-model memorises entity-specific quirks or peeks at the future and reports a
-score it will never reproduce.
-
---------------------------------------------------------------------------------
 3. CROSS-VALIDATION VARIANTS
 --------------------------------------------------------------------------------
 

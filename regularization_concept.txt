@@ -2,14 +2,14 @@
 
 Definition: A technique that adds a penalty to the loss function based on the size of the model's coefficients.
 The Goal: Prevent Overfitting (where the model learns noise as if it were a signal).
-The Mechanism: It forces the model to be "simple" by discouraging large weights ($w$).
+The Mechanism: It forces the model to be "simple" by discouraging large weights (w).
 
 > The "Why": Large weights make the model extremely sensitive to small changes in input. 
-If $w = 1000$, a change of $0.1$ in $x$ changes the output by $100$. If $w = 2$, that same change only affects the output by $0.2$. 
+If w = 1000, a change of 0.1 in x changes the output by 100. If w = 2, that same change only affects the output by 0.2. 
 Small weights create a "smoother" prediction surface.
 
 > Real-World Example: Imagine predicting house prices. 
-Without regularization, your model might find a weird pattern where "houses with blue curtains cost \$50k more" because it happened twice in your training data. 
+Without regularization, your model might find a weird pattern where "houses with blue curtains cost 50k more" because it happened twice in your training data. 
 Regularization forces the weight for "blue curtains" toward zero because it's not a strong enough signal to justify a large weight.
 
 ---------------------------------------------------------------------------------------------------------------------------------
@@ -20,7 +20,8 @@ Regularization forces the weight for "blue curtains" toward zero because it's no
 2.  Reduce Variance: High variance means the model changes drastically with new data. Regularization keeps it stable.
 3.  Simplicity/Interpretability: Especially with L1, it removes "junk" features.
 4.  Numerical Stability: Prevents weights from exploding during training.
-5.  Handle Multicollinearity: When two variables are highly correlated (e.g., Height in cm and Height in inches), the model doesn't know which one to blame for an error. Regularization (specifically L2) distributes the "blame" (weights) between them.
+5.  Handle Multicollinearity: When two variables are highly correlated (e.g., Height in cm and Height in inches), the model doesn't know which one to blame for an error. 
+Regularization (specifically L2) distributes the "blame" (weights) between them.
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
@@ -100,6 +101,7 @@ In Random Forests & XGBoost: The act of building hundreds of smaller trees and a
 In Neural Networks: Aside from L1/L2, neural nets use other genius regularization techniques like:
 Dropout: Randomly turning off a percentage of neurons during training so the network can't rely on just one specific pathway.
 Early Stopping: Monitoring the test data during training and literally hitting the "stop" button the moment the model begins to overfit.
+
 
 Notes:
 We NEVER Regularize the Intercept (Bias Term)
