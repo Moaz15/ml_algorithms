@@ -1,137 +1,413 @@
-1. What is Regularization? (The "Safety Belt")
+1.1 Foundations
+- [2.1] What regularization is and why it works
+- [2.2] Overfitting, underfitting, model capacity
+- [2.3] Bias-variance tradeoff
+- [2.4] Penalty form vs constraint form, and the L1-diamond / L2-circle geometry
+- [2.5] Multicollinearity and ill-conditioned X'X
+- [2.6] Explicit vs implicit regularization
+- [2.7] Regularization vs feature selection vs dimensionality reduction vs more data
+- [2.8] Double descent in over-parameterized models
 
-Definition: A technique that adds a penalty to the loss function based on the size of the model's coefficients.
-The Goal: Prevent Overfitting (where the model learns noise as if it were a signal).
-The Mechanism: It forces the model to be "simple" by discouraging large weights (w).
+1.2 The Penalties
+- [3.1] L2 / Ridge
+- [3.2] L1 / Lasso
+- [3.3] Elastic Net
+- [3.4] L0 / best-subset selection and why it is impractical
+- [3.5] Group Lasso for grouped one-hot features and embeddings
 
-> The "Why": Large weights make the model extremely sensitive to small changes in input. 
-If w = 1000, a change of 0.1 in x changes the output by 100. If w = 2, that same change only affects the output by 0.2. 
-Small weights create a "smoother" prediction surface.
+1.3 Math You Are Expected to Know
+- [   ] Ridge closed-form solution (X'X + lambda I)^-1
+- [   ] SVD view of Ridge: shrinkage per principal direction
+- [   ] Soft-thresholding: the actual mechanism that zeroes a weight
+- [   ] L1 non-differentiable at zero, subgradients
+- [   ] Coordinate descent for Lasso
+- [   ] Lasso shrinkage bias on the coefficients it keeps
+- [   ] Behaviour when p >> n (Lasso selects at most n features)
+- [   ] Grouping effect of Elastic Net on correlated predictors
 
-> Real-World Example: Imagine predicting house prices. 
-Without regularization, your model might find a weird pattern where "houses with blue curtains cost 50k more" because it happened twice in your training data. 
-Regularization forces the weight for "blue curtains" toward zero because it's not a strong enough signal to justify a large weight.
+1.4 Bayesian View
+- [   ] MAP vs MLE framing
+- [   ] Gaussian prior equals L2
+- [   ] Laplace prior equals L1
+
+1.5 Choosing the Strength
+- [   ] lambda / alpha / C conventions and the inversion trap
+- [   ] Cross-validation and GridSearchCV
+- [   ] Path estimators (RidgeCV, LassoCV, ElasticNetCV, LogisticRegressionCV)
+- [   ] Regularization path / coefficient trajectory plots
+- [   ] One-standard-error rule
+- [   ] Nested cross-validation
+
+1.6 Practical Pitfalls
+- [   ] Mandatory feature scaling
+- [   ] Never penalize the intercept
+- [   ] Fit the scaler inside CV folds, not before (leakage)
+- [   ] Penalty normalization conventions (why alpha differs across libraries and sample sizes)
+- [   ] Solver-penalty compatibility in scikit-learn (liblinear, saga, lbfgs)
+- [   ] Interaction with class imbalance and class weights
+- [   ] Regularization cannot fix label noise or bad data
+- [   ] Effect on coefficient interpretability
+
+1.7 Across Algorithms
+- [   ] Linear regression: Ridge / Lasso / Elastic Net
+- [   ] Logistic regression: penalty and C
+- [   ] SVM: C and margin maximization as an L2 penalty
+- [   ] Trees: pre-pruning hyperparameters
+- [   ] Trees: cost-complexity post-pruning (ccp_alpha)
+- [   ] Random Forest: bagging, feature subsampling, depth
+- [   ] Gradient boosting: learning rate / shrinkage, subsample, colsample
+- [   ] XGBoost / LightGBM: reg_lambda, reg_alpha, gamma, min_child_weight, early stopping
+- [   ] Naive Bayes: Laplace smoothing
+- [   ] PCA / dimensionality reduction as implicit regularization
+- [   ] Recommenders and matrix factorization: weight decay on embeddings
+
+1.8 Deep Learning :  Not required in this repo
+- [   ] L2 weight decay
+- [   ] L2 penalty vs decoupled weight decay (Adam vs AdamW)
+- [   ] Dropout: train/test scaling, inverted dropout
+- [   ] Dropout in practice: spatial dropout, attention dropout, stochastic depth
+- [   ] Early stopping, and why it approximates L2
+- [   ] Batch norm / layer norm as side-effect regularizers
+- [   ] Data augmentation
+- [   ] Mixup / CutMix / Cutout
+- [   ] Label smoothing
+- [   ] Noise injection, and input noise as an L2 equivalent
+- [   ] Gradient clipping
+- [   ] Parameter sharing: convolutions, weight tying
+- [   ] Multi-task learning as a regularizer
+- [   ] Transfer learning, pretraining, layer freezing
+- [   ] Ensembling and weight averaging (SWA)
+- [   ] Knowledge distillation
+- [   ] LoRA / adapters as constrained-capacity fine-tuning
+- [   ] Implicit regularization of SGD: batch size, learning rate, warmup
+- [   ] KL penalty and entropy bonus (PPO, RLHF)
+
+1.9 Diagnostics
+- [   ] Learning curves and the train-vs-validation gap
+- [   ] Telling over-regularization (underfitting) from under-regularization
+- [   ] Weight-norm and gradient-norm monitoring
+- [   ] Effect of regularization on probability calibration
+
+1.10 Interview Gotchas
+- [   ] Why L1 gives exact zeros and L2 only shrinks
+- [   ] C vs lambda inversion in scikit-learn
+- [   ] Lasso vs Ridge vs Elastic Net on correlated features
+- [   ] Analytical solution for Ridge but not for Lasso
+- [   ] Effect of increasing lambda on bias and variance
+- [   ] Limiting behaviour as lambda -> 0 and lambda -> infinity
+- [   ] Dropout vs L2: when to prefer which
+- [   ] Bagging vs boosting as variance vs bias control
+- [   ] Sparsity for model compression and serving cost
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
-2. Why Do We Need It? (5 Core Pillars)
+2. FOUNDATIONS
 
-1.  Prevent Overfitting: Stops the model from "memorizing" the training set.
-2.  Reduce Variance: High variance means the model changes drastically with new data. Regularization keeps it stable.
-3.  Simplicity/Interpretability: Especially with L1, it removes "junk" features.
-4.  Numerical Stability: Prevents weights from exploding during training.
-5.  Handle Multicollinearity: When two variables are highly correlated (e.g., Height in cm and Height in inches), the model doesn't know which one to blame for an error. 
-Regularization (specifically L2) distributes the "blame" (weights) between them.
+2.1 What regularization is, and why it works
+--------------------------------------------
+
+Training a model means minimizing error on data I already have. The problem is that data is signal
+plus noise, and nothing in that objective tells the model which is which. Regularization adds a
+second term to the loss that charges the model for complexity - usually the size of its weights. Now
+every large weight has to pay for itself: a feature only gets a big coefficient if it cuts the error
+enough to justify the cost. Patterns that exist only in this particular sample can't cover that
+cost, so they get pushed toward zero. And small weights matter because a large weight means the
+prediction swings hard on a tiny change in input; small weights give a smooth prediction surface, so
+slightly unfamiliar data still gets a sensible answer.
+
+> Real-world: predicting house prices, an unregularized model might learn "blue curtains add 50k"
+  because that happened twice in training. Regularization asks that feature to justify a large
+  weight, it can't, and the weight collapses toward zero.
+
+> Likely follow-up: "So you're deliberately making the model worse?"
+  On training data, yes. I'm trading a little training accuracy for a lot of stability on unseen
+  data, and the test score is the only one that matters.
+
+2.2 Overfitting, underfitting, and model capacity
+-------------------------------------------------
+
+Capacity is just how many different patterns a model is able to represent. Too little capacity and
+it can't even fit the training data - error is high everywhere, that's underfitting. Too much and it
+can fit anything, including the noise - training error goes to nearly zero while test error gets
+worse. I diagnose it by the gap, not by any single number: both errors high means underfit, low
+training error with high validation error means overfit. Regularization is how I dial effective
+capacity down without changing the model class.
+
+> Real-world: a student who memorizes ten years of past exam papers. Perfect on the papers he has
+  seen, lost the moment the question is phrased differently. The student who learned the concepts
+  scores slightly lower on the old papers and much higher on the real exam.
+
+> Likely follow-up: "How do you actually see this in practice?"
+  Learning curves - train and validation error plotted against epochs or training-set size.
+  Overfitting is the point where the two lines start diverging.
+
+2.3 Bias-variance tradeoff
+--------------------------
+
+Bias is the error from the model being too simple to represent the real pattern - it's wrong in the
+same direction every time. Variance is the error from being too sensitive to the particular sample -
+retrain on a different slice of data and you get a noticeably different model. Total error is bias
+plus variance plus irreducible noise, and lambda is the dial between the first two: raise it and you
+add bias but kill variance, drop it to zero and you get a low-bias, high-variance model. There is no
+setting that minimizes both, so I cross-validate to find the bottom of that U-curve.
+
+> Real-world: archery. Bias is a misaligned scope - every arrow tightly grouped, all of them off-
+  center. Variance is shaky hands - arrows scattered all around the bull's eye. Regularization is
+  steadying the hands at the cost of nudging the scope slightly off.
+
+> Likely follow-up: "Does collecting more data fix bias or variance?"
+  Variance. More data will never rescue a model that is structurally too simple for the problem.
+
+2.4 Penalty form vs constraint form, and the L1 / L2 geometry
+-------------------------------------------------------------
+
+Same idea written two ways. The penalty form says: minimize the error, and I will charge you a fine
+that grows with the size of your weights. The constraint form says: minimize the error, but your
+weights have to fit inside a fixed budget. They are equivalent - a bigger fine is just a tighter
+budget. The constraint form is the one worth knowing, because it is the one you can draw, and the
+drawing is what explains why L1 deletes features while L2 only shrinks them.
+
+Take a model with just two weights, so every possible model is a single dot on a flat map - w1 along
+one axis, w2 along the other. Two things live on that map. First, the plain unregularized best fit,
+call it the bullseye, with rings of equal error spreading outward from it like contour lines on a
+hiking map: the further out, the worse the error. Second, the region the budget allows, always
+centred on the origin. For L2 the budget is w1 squared plus w2 squared, which draws a circle. For L1
+the budget is |w1| + |w2|, which draws a diamond - spend everything on one weight and you sit on a
+corner, split it evenly and you sit in the middle of an edge.
+
+The bullseye is outside the allowed region, because the whole point is to force the weights smaller
+than they want to be. So the answer is the lowest-error dot still inside the region, which is
+wherever the growing rings first touch it. A circle is smooth the whole way round, so the ring
+touches it at some ordinary spot where both weights are non-zero - L2 shrinks everything and deletes
+nothing. A diamond's corners stick out further than the flat edges between them, so a ring arriving
+from most directions hits a corner first, and a corner sits exactly on an axis, which means one
+weight is exactly zero. That is L1 doing feature selection.
+
+        L2 budget: a circle                     L1 budget: a diamond
+
+                w2                                          w2
+                |                                           o
+              .-+-.                                        / \
+            .'  |  '.                                     /   \
+      ------+---+---+------ w1                    -------o--+--o-------- w1
+            '.  |  .'                                     \   /
+              '-+-'                                        \ /
+                |                                           o
+
+      no corners anywhere, so a ring        four corners, each sitting exactly on an
+      touches at an ordinary point          axis, and they stick out further than the
+      and both weights survive              edges - touching one sets that weight to 0
+
+> Real-world: think of a fixed budget you spend across features. Under L2 the price per unit climbs
+  the more you load onto a single feature, so concentrating is wasteful and you end up spreading the
+  money thinly - every feature gets a little. Under L1 the price stays flat no matter how much you
+  have already bought, so the smart move is to put everything into the few features with the best
+  return and buy nothing at all from the rest. Those get exactly zero.
+
+> Likely follow-up: "Why does it hit a corner rather than a flat edge?"
+  Because the corners stick out furthest, so they get touched first from most directions. Hitting
+  the middle of an edge needs the rings to arrive at one exact angle, which is the special case
+  rather than the rule - and it gets rarer as you add features, which is why sparsity gets stronger
+  in high dimensions, not weaker.
+
+2.5 Multicollinearity and an ill-conditioned X'X
+------------------------------------------------
+
+When two features carry nearly the same information, the model genuinely cannot tell which one
+deserves the credit. It can put +500 on one and -500 on the other and produce almost identical
+predictions, so the fit looks fine while the weights are enormous, unstable, and liable to flip sign
+if you resample the data. In matrix terms X'X is close to singular, and inverting it amplifies tiny
+bits of noise into huge coefficients. Ridge adds lambda down the diagonal, which makes that matrix
+well-conditioned again and forces the correlated features to share the weight instead of fighting
+over it.
+
+> Real-world: a churn model containing both "total spend in last 30 days" and "average spend per day
+  in last 30 days" - effectively the same column. Unregularized, you get one huge positive and one
+  huge negative coefficient and the model is uninterpretable. Ridge splits the credit between them
+  and the weights become readable again.
+
+> Likely follow-up: "Wouldn't Lasso solve it too?"
+  It would zero one of them, which stabilizes predictions, but which one survives is close to
+  arbitrary and can change between runs. If I want both selection and stability I use Elastic Net.
+
+2.6 Explicit vs implicit regularization
+---------------------------------------
+
+Explicit regularization is anything I deliberately wrote into the loss - L1, L2, dropout, weight
+decay. Implicit regularization is everything else in the training setup that quietly limits
+complexity without ever appearing in the objective: SGD with small batches, the learning rate
+schedule, stopping before full convergence, and the architecture itself. This matters because in
+deep learning most of the generalization you get is implicit - teams routinely gain more from batch
+size and learning rate than from tuning the weight decay coefficient.
+
+> Real-world: nobody writes a penalty term saying "a cat shifted ten pixels right is still a cat",
+  but a CNN's weight sharing enforces exactly that constraint structurally. That single
+  architectural choice is why CNNs beat fully-connected networks on images given the same amount of
+  data.
+
+> Likely follow-up: "Name an implicit regularizer nobody calls a regularizer."
+  Batch size. Small batches mean noisy gradients, and that noise regularizes. Scale the batch up
+  without adjusting anything else and generalization usually degrades.
+
+2.7 Regularization vs feature selection vs dimensionality reduction vs more data
+--------------------------------------------------------------------------------
+
+All four reduce overfitting, but they are not interchangeable. More data is the best fix whenever
+it's available and affordable, because it cuts variance without adding bias. Regularization is what
+I reach for when the data is fixed - it keeps every feature but caps how much influence any one of
+them can have. Feature selection removes columns outright, which is what I want when serving latency
+or interpretability is the real constraint. Dimensionality reduction keeps the information but
+rewrites it into fewer directions, which helps with collinearity and speed but costs
+interpretability, since a principal component is not a real feature anyone can reason about. In
+practice I start with regularization because it's the cheapest thing to try, then move to selection
+or reduction only for a specific reason.
+
+> Real-world: a churn model with 3,000 features. First pass is L2 across all of them. If the model
+  then has to serve in 10ms, I switch to L1, drop to the 50 features carrying real signal, and ship
+  something small.
+
+> Likely follow-up: "Which of these would you not use to fix overfitting?"
+  PCA on its own. It's unsupervised - it keeps the directions with the most variance, not the ones
+  that predict your target, so you can easily discard the signal and keep the noise.
+
+2.8 Double descent in over-parameterized models
+-----------------------------------------------
+
+The textbook curve says test error falls, bottoms out, then rises as you add capacity. That holds
+right up to the point where the model has roughly as many parameters as training examples - it can
+just barely memorize the data, and it does so in the ugliest way possible, so test error spikes.
+Push well past that point, far more parameters than data, and test error comes down again, often
+below the earlier minimum. The reason is that once there are many ways to fit the data perfectly,
+SGD tends to pick one of the smoothest ones - implicit regularization doing the work. The practical
+takeaway is that "this model is huge relative to my data, so it must be overfitting" is no longer a
+safe inference, and the fix for a bad model is sometimes a bigger one rather than a smaller one.
+
+    test error
+    ^
+    |                                        .
+    |   \                                   / \
+    |    \                                 /   \
+    |     \                               /     \
+    |      \                             /       \
+    |       \                           /         \
+    |        \                         /           \
+    |         \                       /             \
+    |          \__                   /               \
+    |             \_________________/                 \
+    |                                                  \________________
+    +----------------------------------------------------------------------> model capacity
+                           ^                 ^                  ^
+                       classical       interpolation   over-parameterized
+                      sweet spot         threshold           regime
+                               (parameters = training rows)
+
+> Real-world: this is why a large language model with far more parameters than it has training
+  examples per task doesn't simply memorize and collapse - it's operating well past the
+  interpolation spike.
+
+> Likely follow-up: "Then does regularization still matter for large models?"
+  Yes. Weight decay, augmentation and early stopping still buy measurable gains. Double descent says
+  raw capacity isn't the enemy, not that regularization stopped working.
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
-3. L2 Regularization (Ridge Regression)
+3. THE PENALTIES
 
-Formula: J(w) = Loss + λ Σ w_i^2
+3.1 L2 / Ridge
+--------------
 
-* Key Effect: Shrinks weights toward zero but never makes them exactly zero.
-* The "Why": Because the penalty is squared (w^2), the penalty for a large weight is massive, but the penalty for a tiny weight (like 0.0001) is almost non-existent. The gradient 2λw vanishes as w approaches zero.
+The penalty is the sum of squared weights. Because the cost grows with the square, one big weight is
+far more expensive than several small ones - a weight of 10 costs 100, while two weights of 5 cost
+50 total - so Ridge always prefers to spread influence around rather than concentrate it. It shrinks
+every weight toward zero but never reaches zero, and the reason is in the gradient: the pull is
+proportional to the weight itself, so as a weight gets small the pull gets weak and the shrinking
+stalls before it arrives. It's smooth everywhere, which means it has a closed-form solution and is
+cheap and stable to fit. This is my default when I believe most features carry at least a little
+signal, and especially when features are correlated.
 
-> Real-World Example: Medical Diagnosis. You have 100 blood markers. Most of them have a tiny bit of useful info. You don't want to delete any, but you don't want any single marker to dominate the prediction. Ridge keeps all 100 markers but "muffles" their volume.
+> Real-world: medical diagnosis with 100 blood markers. Most carry a small amount of useful
+  information. I don't want to delete any of them, but I also don't want one marker dominating the
+  prediction. Ridge keeps all 100 and turns down the volume on each.
 
-
----------------------------------------------------------------------------------------------------------------------------------
-
-4. L1 Regularization (Lasso Regression)
-
-Formula: J(w) = Loss + λ Σ |w_i|
-
-* Key Effect: Sparsity. It sets irrelevant feature weights to exactly zero.
-* The "Why": The penalty is a constant "pull" (+λ or -λ). Even if a weight is 0.00001, L1 still pulls it with a full force of λ, eventually "clipping" it to zero.
-
-> Real-World Example: Genetics. You are looking at 20,000 genes to see which ones cause a disease. You know only about 10-20 genes are actually responsible. Lasso acts as a filter, zeroing out the 19,980 irrelevant genes, leaving you with a clean list.
-
----------------------------------------------------------------------------------------------------------------------------------
-
-5. Elastic Net (The Hybrid)
-
-Formula: J(w) = Loss + λ1 Σ |w_i| + λ2 Σ w_i^2
-
-* The "Why": Lasso has a weakness—if two features are highly correlated, it randomly picks one and kills the other. Ridge keeps both. Elastic Net allows you to get the "feature selection" of Lasso while keeping the "group stability" of Ridge.
-
-> Real-World Example: NLP (Text Classification). "Awesome" and "Excellent" are highly correlated. Lasso might kill "Excellent." Elastic Net will keep both but maybe give them smaller, equal weights while still zeroing out useless words like "the" or "and."
-
----------------------------------------------------------------------------------------------------------------------------------
-
-6. Regularization in Deep Learning
-
-Deep networks have millions of parameters, making them "overfitting machines."
-* L2 Weight Decay: The most common.
-* Dropout: Randomly "turning off" neurons during training.
-    * Why? It prevents neurons from becoming "codependent." Each neuron must learn to be useful on its own.
-* Early Stopping: Stop training the moment the Validation Loss starts to rise.
-    * Why? Further training only helps the model memorize noise.
-
----------------------------------------------------------------------------------------------------------------------------------
-
-7. Crucial Interview "Gotchas" (The Expert Level)
-
-A. Feature Scaling (Mandatory!)
-* The Why: Regularization treats all w the same. If x1 is "Income" (0-$100k) and x2 is "Number of Kids" (0-5), the weight for kids will naturally be much larger to compensate for the small input. Regularization will unfairly attack the "Kids" weight because it looks "too big."
-* Solution: Always use StandardScaler before regularizing.
-
-B. The Bayesian Interpretation
-* L2 (Ridge) is equivalent to assuming weights follow a Gaussian (Normal) Prior.
-* L1 (Lasso) is equivalent to assuming weights follow a Laplace Prior (which is "peakier" at zero).
-
-C. Bias-Variance Tradeoff
-* Increasing lambda increases Bias (model becomes too simple/underfits).
-* Increasing lambda decreases Variance (model becomes more stable/less prone to noise).
-* The goal is to find the "sweet spot" where the Total Error is minimized.
-
----------------------------------------------------------------------------------------------------------------------------------
-
-8. Summary Table for Quick Revision
-
-| Feature | L1 (Lasso) | L2 (Ridge) | Elastic Net |
-| :--- | :--- | :--- | :--- |
-| Penalty | Absolute (|w|) | Squared (w^2) | Both |
-| Sparsity | Yes (Sets to 0) | No (Shrinks) | Yes |
-| Feature Selection | Automatic | No | Automatic |
-| Handling Correlated Features | Picks one at random | Shares weight among them | Best of both |
-| Computational | No analytical solution | Has analytical solution | No analytical solution |
-
-In Decision Trees: Regularization is done through "Pruning" or setting hyperparameter limits (e.g., max_depth=5 or min_samples_split=10). You are artificially stopping the tree from getting too complex.
-In Random Forests & XGBoost: The act of building hundreds of smaller trees and averaging their predictions (Ensembling) is, in itself, a massive form of regularization designed to reduce the high variance of a single decision tree.
-In Neural Networks: Aside from L1/L2, neural nets use other genius regularization techniques like:
-Dropout: Randomly turning off a percentage of neurons during training so the network can't rely on just one specific pathway.
-Early Stopping: Monitoring the test data during training and literally hitting the "stop" button the moment the model begins to overfit.
+> Likely follow-up: "What exactly does Ridge do with two correlated features?"
+  Splits the weight between them, roughly evenly. That's the same squared-cost argument - spreading
+  a fixed total across two weights is cheaper than loading it all onto one.
 
 
-Notes:
-We NEVER Regularize the Intercept (Bias Term)
+3.2 L1 / Lasso
+--------------
 
-The Concept: The penalty applies to weights ($w_1, w_2, ...$), but not to the y-intercept ($w_0$ or $b$).
-The Why: Regularizing feature weights simplifies the model by reducing the influence of features. But the intercept just represents the baseline average of the target variable when all inputs are zero. Penalizing the intercept doesn't reduce complexity; it just artificially forces your regression line away from the mean of the data, creating a terrible fit.
-(Note: Scikit-learn handles this automatically by default).
+The penalty is the sum of absolute values, and the effect is sparsity - it drives weights to exactly
+zero, so feature selection happens as part of fitting rather than as a separate step. The reason is
+again in the gradient: the pull toward zero is a constant lambda no matter how small the weight
+already is, so it never weakens. Any feature whose contribution to reducing error is worth less than
+that constant pull gets driven to zero and pinned there. The price is that the absolute value has a
+sharp corner at zero so there's no closed form, and it's unstable with correlated features - it
+picks one of them essentially at random.
 
-The Scikit-Learn Trap ($C$ vs. $\lambda$ or $\alpha$)
+> Real-world: genetics, screening 20,000 genes when only 10 or 20 actually drive the disease. Lasso
+  zeroes out the other 19,980 and hands back a short list you can take to a lab.
 
-The Concept: Depending on the algorithm you call in Python, the regularization parameter is named differently and works backward!
-The Why:
-In Ridge() and Lasso(), the parameter is alpha (which is $\lambda$). Higher alpha = More Regularization.
-In LogisticRegression() and SVC() (Support Vector Machines), the parameter is C. Mathematically, $C = \frac{1}{\lambda}$. Lower C = More Regularization. 
-(Many candidates fail interviews by saying "I increased C to regularize the model").
+> Likely follow-up: "Are the coefficients that survived Lasso trustworthy?"
+  No - they're biased toward zero, because the same constant pull that killed the others is still
+  shrinking the survivors. If I need honest magnitudes I refit a plain unpenalized model on just the
+  selected features.
 
-L1 is Non-Differentiable at Zero
+3.3 Elastic Net
+---------------
 
-The Concept: Because L1 uses an absolute value graph (a "V" shape), there is a sharp corner at exactly $w = 0$. In calculus, you cannot calculate the derivative at a sharp corner.
-The Why: Because of this, standard Gradient Descent struggles to solve Lasso Regression. 
-Under the hood, libraries like Scikit-Learn have to use a different optimization algorithm called Coordinate Descent or Subgradient Methods to solve L1. 
-(Ridge has a smooth "U" shape, so standard calculus and analytical solutions work perfectly).
+It's both penalties at once, with a knob controlling the mix. It exists because Lasso has two
+specific failures: with correlated features it arbitrarily keeps one and kills the rest, and when
+you have more features than rows it can't select more than n of them no matter what. The L2 part
+restores the grouping behaviour so correlated features tend to enter or leave together, while the L1
+part still zeroes out the genuine junk. So I get Lasso's feature selection with Ridge's stability.
 
-Cross-Validation (The "How-To")
+> Real-world: text classification. "Awesome" and "excellent" are highly correlated. Lasso might keep
+  one and delete the other, which makes the model look arbitrary to anyone reading it. Elastic Net
+  keeps both with smaller, similar weights, while still zeroing out "the" and "and".
 
-The Concept: You cannot guess $\lambda$ (or alpha / C). It must be tuned.
-The Why: If you check your model's performance on the training data, a model with NO regularization will always win. 
-Therefore, you must use Cross-Validation (like GridSearchCV, or specialized estimators like RidgeCV and LassoCV in Scikit-Learn) to test different values of $\lambda$ on unseen validation folds to find the true "sweet spot."
+> Likely follow-up: "How do you tune two penalties at once?"
+  I don't tune them as two separate lambdas. Scikit-learn reparameterizes it as alpha for total
+  strength and l1_ratio for the mix, so I grid a few l1_ratio values and let alpha be cross-
+  validated along the path - that's what ElasticNetCV does.
 
+3.4 L0 and best-subset selection
+--------------------------------
 
+L0 penalizes the count of non-zero weights, which is literally what we mean when we say "use fewer
+features" - nothing is shrunk, a feature is either in at full strength or out. The problem is that a
+count has no useful gradient; it's flat everywhere and jumps at the boundaries, so there's nothing
+for an optimizer to follow. Solving it honestly means trying every combination, which is 2^p subsets
+- at just 30 features that's over a billion models. So L1 is the practical stand-in: it's the
+closest convex relaxation of L0, meaning it's actually solvable, and under reasonable conditions it
+recovers the same subset.
 
+> Real-world: "pick the best 10 features out of 100" sounds like a small ask, but it's about 17
+  trillion combinations. This is the whole reason Lasso earned its place - it turns an impossible
+  search into one convex optimization.
 
+> Likely follow-up: "Isn't stepwise selection doing the same job?"
+  Stepwise is a greedy approximation of L0 and it's fragile - one early inclusion changes every
+  decision after it, and the p-values it reports are invalid because the data was used to choose the
+  model in the first place.
+
+3.5 Group Lasso
+---------------
+
+Plain L1 treats every column as an independent thing to keep or drop, which is wrong whenever
+columns come in natural groups. A one-hot encoded category is one concept spread across many
+columns, and an embedding is one entity spread across many dimensions. Lasso will happily zero out
+three of the five levels of a category, which doesn't mean anything - you've half-deleted a feature.
+Group Lasso penalizes the norm of each group as a single unit, so a group either survives intact or
+goes to zero entirely.
+
+> Real-world: a model where "city" is one-hot encoded into 200 columns, and the real question is
+  whether the pipeline should collect the city field at all. Lasso can't answer that - it keeps 40
+  of the 200 columns, so you still need the field. Group Lasso drops all 200 or keeps all 200, which
+  is the decision you actually have to make.
+
+> Likely follow-up: "Where does this idea show up outside linear models?"
+  Structured pruning in neural networks. You want to remove whole channels or attention heads, not
+  scattered individual weights, because only whole-unit removal actually makes the model faster on
+  real hardware.
 
