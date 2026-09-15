@@ -1,0 +1,251 @@
+3. SPLITTING CRITERIA
+
+3.1 Entropy and information gain
+--------------------------------
+Why a number is needed at all
+
+    A node holds rows with mixed labels. To choose between candidate questions, the tree needs one
+    number that says how mixed the node is. The best question is then simply the one that reduces
+    that number the most. Entropy is that number.
+
+ENTROPY
+    Entropy    :  how uncertain you still are about the label of a random row in this node,
+                  measured in bits. One bit is one yes/no question's worth of doubt.
+    Formula    :  H  =  - SUM over classes i of  p_i * log2(p_i)
+    Where      :  p_i  =  rows of class i in the node / total rows in the node
+    Range      :  H = 0         pure node - every row the same class, nothing left to ask
+                  H = 1         two classes at 50/50 - exactly one question's worth of doubt
+                  H = log2(k)   the maximum, reached when all k classes are equally likely
+    log2(0)    :  undefined, but a class with p_i = 0 contributes nothing. The convention is to
+                  treat that whole term as 0, so absent classes are simply skipped.
+    Example    :  a node with 4 Pass and 6 Fail
+                  p_pass = 4/10 = 0.4          p_fail = 6/10 = 0.6
+                  H = -( 0.4 * log2(0.4)  +  0.6 * log2(0.6) )
+                    = -( 0.4 * (-1.3219)  +  0.6 * (-0.7370) )
+                    =    0.5288           +  0.4422
+                    =    0.971 bits
+
+INFORMATION GAIN
+    Info gain  :  how many bits of uncertainty one particular split removed. This is the score the
+                  tree maximises - try every candidate split, keep the largest gain.
+    Formula    :  IG  =  H(parent)  -  SUM over children of  (n_child / n_parent) * H(child)
+    In words   :  the uncertainty before the question, minus what is left after it. The difference
+                  is what the question bought you.
+    Example    :  the same 4 Pass / 6 Fail node, H(parent) = 0.971
+                  split on "studied more than 5 hours?"
+                      yes  ->  4 Pass, 1 Fail    5 rows    H = 0.722
+                      no   ->  0 Pass, 5 Fail    5 rows    H = 0.000
+                      weighted  =  0.5 * 0.722  +  0.5 * 0.000  =  0.361
+                      IG        =  0.971 - 0.361  =  0.610    <- a strong split
+                  split on "wears glasses?"
+                      yes  ->  2 Pass, 3 Fail    5 rows    H = 0.971
+                      no   ->  2 Pass, 3 Fail    5 rows    H = 0.971
+                      weighted  =  0.971
+                      IG        =  0.971 - 0.971  =  0.000    <- tells you nothing
+
+WHY THE WEIGHTING IS NOT OPTIONAL
+
+    Each child's entropy is multiplied by the fraction of rows that reached it. Drop that and a
+    split which peels off two already-pure rows beats a split that genuinely separates the data.
+
+    Parent: 50 Pass, 50 Fail,  H = 1.000
+                 children                          IG weighted      IG unweighted
+    split A      (40P,10F) and (10P,40F)              0.278              0.278
+    split B      ( 2P, 0F) and (48P,50F)              0.020              0.500
+
+    Split A is clearly the better question, and weighted gain says so. Unweighted, split B wins by
+    a mile - despite having moved two rows and left the other 98 exactly as mixed as before.
+
+> Real-world: the game of twenty questions. Entropy is how much you still do not know, and a good
+  question is one that roughly halves the remaining possibilities. "Is it alive?" near the start
+  carries close to a full bit of gain. "Is it a platypus?" carries almost none, because whichever
+  way it goes you have barely narrowed anything down.
+
+> Likely follow-up: "What is the maximum entropy for k classes?"
+  log2(k) - so 1 bit for two classes, 2 bits for four. Worth keeping as a sanity check: if a
+  from-scratch entropy function ever returns more than log2(k), it has a bug.
+
+3.2 Gini impurity
+-----------------
+
+Why a second impurity measure exists
+
+    Entropy already answers the question "how mixed is this node?". But every evaluation of it
+    costs a logarithm, and a tree evaluates impurity millions of times in a single fit. Gini
+    answers the same question using only multiplication, which is why CART reaches for it by
+    default.
+
+
+GINI IMPURITY
+
+    Gini       :  the probability you would label a row wrongly if you picked a row from the node
+                  at random, then guessed its class at random from the node's own class mix.
+
+    Formula    :  G  =  1  -  SUM over classes i of  (p_i)^2
+
+    Where      :  p_i  =  rows of class i in the node / total rows in the node
+
+    Range      :  G = 0          pure node - guessing from a one-class mix is never wrong
+                  G = 0.5        two classes at 50/50 - a coin flip
+                  G = 1 - 1/k    the maximum, reached when all k classes are equally likely
+
+    Example    :  a node with 4 Pass and 6 Fail
+
+                  p_pass = 4/10 = 0.4          p_fail = 6/10 = 0.6
+
+                  G = 1 - ( 0.4^2  +  0.6^2 )
+                    = 1 - ( 0.16   +  0.36  )
+                    = 1 -   0.52
+                    =       0.480
+
+
+WHERE "1 MINUS THE SUM OF SQUARES" COMES FROM
+
+    The formula is not an arbitrary choice. Write out the error probability directly:
+
+        P(the row is class i)       =  p_i
+        P(you guess anything else)  =  1 - p_i
+
+        P(wrong)  =  SUM over i of  p_i * (1 - p_i)
+                  =  SUM p_i  -  SUM (p_i)^2
+                  =  1  -  SUM (p_i)^2            because the proportions add up to 1
+
+    So Gini is literally that error probability, rearranged.
+
+
+USING IT TO SCORE A SPLIT
+
+    Same shape as information gain - only the impurity function is swapped out.
+
+    Formula    :  drop  =  G(parent)  -  SUM over children of  (n_child / n_parent) * G(child)
+
+    In sklearn :  this is the impurity decrease. min_impurity_decrease thresholds the same
+                  quantity, additionally scaled by the fraction of all training rows that reach
+                  the node - so an identical drop counts for less the deeper you are in the tree.
+
+    Example    :  the same 4 Pass / 6 Fail node, G(parent) = 0.480
+
+                  split on "studied more than 5 hours?"
+                      yes  ->  4 Pass, 1 Fail    5 rows    G = 0.320
+                      no   ->  0 Pass, 5 Fail    5 rows    G = 0.000
+                      weighted  =  0.5 * 0.320  +  0.5 * 0.000  =  0.160
+                      drop      =  0.480 - 0.160  =  0.320
+
+    Compare    :  entropy scored this same split at 0.610 bits, Gini scores it 0.320. Different
+                  scales, but both rank it above the useless split - which is the whole subject
+                  of 3.3.
+
+
+> Real-world: a support queue that is 90 percent billing and 10 percent technical. Gini is
+  1 - (0.81 + 0.01) = 0.18, so routing tickets by guessing from the mix would be wrong about 18
+  percent of the time. An evenly split queue scores 0.5 - a coin flip. That is the number every
+  split is trying to drive down.
+
+> Likely follow-up: "What is the maximum Gini for k classes?"
+  1 - 1/k, so 0.5 for two classes and 0.9 for ten. Note the contrast with entropy: Gini stays below
+  1 no matter how many classes there are, while entropy grows without bound as log2(k).
+
+
+3.3 Gini vs entropy: whether the choice actually changes the tree
+-----------------------------------------------------------------
+
+Almost never, in practice. Both are zero at a pure node, both peak when the classes are evenly
+mixed, and in between their curves have the same shape - entropy simply peaks higher and bends a
+little more sharply near the pure ends. They select a different split only occasionally, and the
+accuracy difference that follows is usually inside the noise. The honest interview answer is that
+this is not the knob that matters: max_depth and min_samples_leaf will move your results far more
+than the criterion will. Entropy costs a logarithm per evaluation, scikit-learn defaults to Gini,
+and that is roughly the whole story.
+
+    p(class 1)     0.00   0.10   0.25   0.50   0.75   0.90   1.00
+    entropy       0.000  0.469  0.811  1.000  0.811  0.469  0.000
+    gini          0.000  0.180  0.375  0.500  0.375  0.180  0.000
+
+    Same shape, same zeros, same peak position. Entropy just sits higher.
+
+> Real-world: a candidate who spends two minutes arguing for entropy over Gini has told the
+  interviewer they have not tuned many trees. The answer that lands is "I default to Gini because it
+  is cheaper and the difference is negligible - the depth and leaf-size constraints are where the
+  real decisions are."
+
+> Likely follow-up: "Is there any situation where the choice does matter?"
+  Entropy punishes impurity a little harder near the pure end, so it is marginally more willing to
+  carve out small pure leaves and can grow slightly bushier trees. If you are seeing a real gap
+  between the two on your data, read it as a signal that the tree is under-regularized; fix the
+  depth and leaf-size constraints and the gap closes.
+
+3.4 Gain ratio, and the bias toward high-cardinality features
+-------------------------------------------------------------
+
+Raw information gain has a structural bias: it loves features with many distinct values. Split on a
+customer ID and every child holds a single row, so every child is perfectly pure and the gain is as
+large as it can possibly be - the tree has learned a lookup table that generalizes to nothing.
+C4.5's fix is gain ratio: divide the gain by the split's own entropy, a quantity that measures only
+how much the split fragments the data and ignores the labels entirely. A thousand-way split has
+enormous split information, so dividing by it collapses the score. CART dodges the worst of this
+differently, by only ever splitting in two, so no single split can fragment into a thousand
+children. The bias does not disappear though - a feature with more distinct values still offers more
+candidate thresholds and wins more ties, which is the same bias that later shows up in impurity-
+based feature importance.
+
+> Real-world: any table that still has an ID column, a raw timestamp or a hash sitting in it.
+  Information gain will happily make it the root, training accuracy will hit 100 percent, and
+  holdout accuracy will collapse. Drop the column; if you genuinely need it, check permutation
+  importance on held-out data before believing anything the tree says about it.
+
+> Likely follow-up: "Does gain ratio have a downside of its own?"
+  It over-corrects. The denominator gets very small for a very unbalanced split, so the ratio can
+  end up favouring splits that peel off a tiny sliver. C4.5 patches this by first keeping only the
+  splits with at least average information gain, then maximizing the ratio within that shortlist.
+
+3.5 Variance reduction / MSE for regression trees
+-------------------------------------------------
+
+For a continuous target there are no class proportions, so impurity becomes spread. A node's
+impurity is the variance of the targets inside it, and a split is scored by the parent's variance
+minus the sample-weighted variance of its children. Maximizing that reduction is exactly the same
+thing as minimizing total squared error, which is why scikit-learn names the criterion
+squared_error. The leaf then predicts the mean of the targets that reached it. Those two choices are
+not independent: the mean is the constant that minimizes squared error, so the criterion and the
+leaf rule are one decision stated twice.
+
+> Real-world: predicting delivery time. Split on "distance over 5 km" and each group's times cluster
+  tightly around their own average - a large variance reduction. Split on the driver's shirt colour
+  and both groups stay exactly as spread out as the parent, so the reduction is about zero and the
+  tree correctly ignores it.
+
+> Likely follow-up: "Why is the leaf value the mean rather than, say, the median?"
+  Because it has to match the criterion. You scored the split by squared error, and the mean is the
+  constant that minimizes squared error, so anything else leaves error on the table. Switch the
+  criterion to absolute_error and the leaf value becomes the median - more robust to a wild target
+  value, but noticeably slower, because a median cannot be updated incrementally as the threshold
+  scan moves the way a running mean can.
+
+3.6 Why misclassification rate is a poor splitting criterion
+------------------------------------------------------------
+
+The obvious criterion is the one you actually care about: what fraction of this node would I get
+wrong if I predicted its majority class? It turns out to be a bad thing to grow a tree with. Error
+rate is piecewise linear in the class proportions rather than strictly concave, which makes it
+insensitive to changes that are real progress. A split can make one child dramatically purer while
+the error rate registers no improvement at all, and a greedy search that sees zero gain has no
+reason to take it. Gini and entropy are strictly concave, so any split whose children are purer than
+their parent scores positive.
+
+              children                        error rate   weighted gini
+    parent    400 A / 400 B                        0.500           0.500
+    split A   (300A,100B) and (100A,300B)          0.250           0.375
+    split B   (200A,400B) and (200A,  0B)          0.250           0.333
+
+    Error rate scores A and B identically. Gini prefers B - correctly, because B has
+    already finished one branch with a pure leaf.
+
+> Real-world: this is why the criterion you grow with and the metric you report are different
+  things, and that is not a contradiction. Growing needs a score sensitive enough to reward partial
+  progress toward a pure leaf. Reporting only has to describe the finished model, so accuracy, AUC
+  or whatever the business cares about belongs there instead.
+
+> Likely follow-up: "So is error rate ever the right criterion?"
+  Yes - for pruning. Cost-complexity pruning compares whole finished subtrees against each other
+  rather than searching for the next incremental split, so the bluntness that made error rate
+  useless for growing stops mattering there.

@@ -1,0 +1,233 @@
+2. FOUNDATIONS
+
+2.1 What a decision tree is, and why one algorithm covers both tasks
+--------------------------------------------------------------------
+
+The idea in one line
+
+    A tree is a chain of yes/no questions about the features. Each answer narrows the set of rows
+    you could still be looking at, until the group is clean enough to read an answer straight off
+    it.
+
+HOW IT IS BUILT, AND HOW IT PREDICTS
+
+    Training    :  start with every row at the top, ask the one question that best separates them,
+                   then repeat the same thing on each half until a stopping rule fires.
+
+    Predicting  :  walk the new row down the questions and return whatever the group at the bottom
+                   says.
+
+    Cost        :  training is the expensive part. Predicting is a handful of comparisons, one per
+                   level.
+
+ONE ALGORITHM, TWO TASKS
+
+    Only two things change between a classifier and a regressor. The growth procedure, the threshold
+    search and the stopping rules are all identical.
+
+                            classification              regression
+    a split is scored by    Gini or entropy             variance
+    a leaf returns          the majority class          the mean
+
+> Real-world: loan approval. Is income above 50k? Yes - then is the account older than two years?
+  Yes - then approve. That is exactly the checklist a human loan officer works from, which is why a
+  tree is the model business stakeholders can actually read and argue with.
+
+> Likely follow-up: "Why does every row landing in the same leaf get the same prediction?"
+  Because a leaf is a region of feature space, and every row in it answered every question
+  identically - the model has nothing left to tell them apart. That is also why a tree's prediction
+  surface is a staircase of flat pieces rather than a smooth curve.
+
+
+2.2 Anatomy: root, internal node, branch, leaf
+----------------------------------------------
+
+    Root           :  the top node. Holds the entire training set and asks the first question.
+
+    Internal node  :  any node that asks a question and splits what reaches it.
+
+    Branch         :  one outcome of a question. In CART there are always exactly two.
+
+    Leaf           :  a terminal node. No question, just a stored prediction.
+
+    Depth          :  how many questions sit between the root and a given node. The root itself is
+                      depth zero.
+
+    Path           :  root down to one leaf. Reads as a single plain-English rule, and that is the
+                      entire basis of a tree's interpretability.
+
+    income > 50k ?                         <- root: holds the entire training set
+    |
+    |-- no  --> reject                     <- leaf: no question, just a stored prediction
+    |
+    `-- yes --> tenure > 2 years ?         <- internal node: asks another question
+                |
+                |-- no  --> reject         <- leaf
+                |
+                `-- yes --> approve        <- leaf
+
+> Real-world: this is why "explain the model to compliance" is easy with a tree and hard with almost
+  anything else. You hand over the root-to-leaf paths, and each one is a sentence someone without a
+  maths background can check.
+
+> Likely follow-up: "How many leaves can a tree of depth d have?"
+  Up to 2^d. That is the intuition for why depth is the strongest overfitting knob you have - every
+  extra level doubles the number of regions the model can carve the feature space into.
+
+
+2.3 Greedy recursive binary splitting, top-down
+-----------------------------------------------
+
+THE PROCEDURE
+
+    1.  At the current node, try every feature and every candidate threshold.
+    2.  Score each candidate by how much impurity it removes.
+    3.  Keep the best one and split the rows in two.
+    4.  Run the same steps again on each child.
+    5.  Stop when a stopping rule fires, and turn that node into a leaf.
+
+THE THREE WORDS IN THE NAME
+
+    Greedy     :  takes the best split available right now, without checking whether a slightly
+                  worse split would set up a much better pair of splits below it.
+
+    Recursive  :  each child is solved by the same procedure, blind to the rest of the tree.
+
+    Binary     :  CART always splits in two, so a multi-way question becomes a chain of yes/no
+                  questions.
+
+> Real-world: navigating by always taking the road that points most directly at your destination.
+  Usually fine, occasionally walks you into a dead end that one look ahead would have avoided.
+
+> Likely follow-up: "Can the tree revisit a split it has already made?"
+  No. Once a split is made it is permanent, and each child only ever sees its own subset. That one-
+  way growth is what post-pruning partly compensates for - you can cut a branch back afterwards, but
+  you can never re-choose the root.
+
+
+2.4 Why greedy: the globally optimal tree is out of reach
+---------------------------------------------------------
+
+    The question  :  why not search for the best tree overall, instead of the best split at each
+                     step?
+
+    The answer    :  the number of possible trees explodes with features and thresholds, and finding
+                     the optimal one is NP-hard. It is not something you can run on real data.
+                     Greedy gets a good tree quickly instead of the best tree never.
+
+    What follows  :  the tree you end up with is not the best tree, just a good one found fast. That
+                     is part of why pruning exists - to repair some of the damage after the fact.
+
+WHERE GREEDY ACTUALLY FAILS: XOR
+
+    two features, and the label is "exactly one of them is true"
+
+        x1   x2   label
+         0    0     0
+         0    1     1
+         1    0     1
+         1    1     0
+
+    split on x1 alone  ->  left is 50/50, right is 50/50   ->  impurity drop = 0
+    split on x2 alone  ->  left is 50/50, right is 50/50   ->  impurity drop = 0
+
+    A greedy scorer looking one split ahead sees nothing worth doing here - yet two splits
+    in sequence separate the data perfectly.
+
+> Real-world: any genuine interaction effect - "this offer converts only for new users on mobile".
+  Neither "is new user" nor "is mobile" moves impurity much on its own, so a greedy scorer can walk
+  straight past the pair that matters.
+
+> Likely follow-up: "So can a tree represent XOR at all?"
+  Yes, exactly, at depth 2. The difficulty is the search, not the representation. With enough data
+  it usually still finds it, because sampling noise gives one feature a slight edge and the second
+  split then works. But set min_impurity_decrease above zero and it will never get started.
+
+
+2.5 Axis-aligned rectangular decision boundaries
+------------------------------------------------
+
+    Every split    :  has the form  feature_j <= t  - a cut perpendicular to one axis.
+
+    So regions     :  are always axis-aligned boxes.
+
+    So boundaries  :  are always staircases of horizontal and vertical segments.
+
+    The one-liner  :  a tree is invariant to rescaling a feature, but not to rotating the feature
+                      space.
+
+    the boundary you actually want                 what an axis-aligned tree draws
+    income                                         income
+      ^                                              ^
+      | approve    /                                 | approve  ____
+      |         /                                    |       __|
+      |      /                                       |    __|
+      |   /   reject                                 |___|   reject
+      +-------------------> debt                     +-------------------> debt
+
+    A genuinely diagonal boundary can only be approximated, and it takes a lot of splits to
+    approximate it badly.
+
+> Real-world: a fraud rule like "flag it if the amount is more than twice this customer's usual
+  amount". In (amount, usual_amount) space that is a diagonal, and a tree needs dozens of splits to
+  approximate it. Engineer the ratio into one column and a single split does the whole job. That is
+  the practical lesson: with trees, build the interaction you care about into a feature rather than
+  hoping the tree discovers it.
+
+> Likely follow-up: "How would you spot that this is what is hurting you?"
+  Fit a logistic regression on the same features. If a linear model beats a well-tuned tree, the
+  boundary is probably close to linear and the tree is burning its depth budget building a
+  staircase.
+
+
+2.6 Low bias, high variance when left unpruned
+----------------------------------------------
+
+    Unconstrained  :  a tree keeps splitting until every leaf is pure, so it can fit any training
+                      set exactly. That is essentially zero bias.
+
+    The price      :  variance. Splits are chosen greedily from the data, so changing a few rows can
+                      change an early split - and everything below it is then different.
+
+DEPTH IS THE DIAL
+
+                      bias        variance    behaviour
+    shallow tree      high        low         underfits, barely more than one rule
+    deep tree         low         high        memorises the training set
+
+    How to set it  :  tune max_depth by cross-validation, or grow the tree deep and prune it back
+                      afterwards.
+
+> Real-world: two analysts handed 90 percent overlapping samples of the same data produce trees with
+  different root splits, and then tell different stories about which feature matters most. Neither
+  of them is wrong; the method simply is not stable.
+
+> Likely follow-up: "Which way is a single tree usually wrong?"
+  Variance, almost always. That is exactly why the standard fix is averaging many trees rather than
+  tuning one of them harder.
+
+
+2.7 Why no feature scaling is needed
+------------------------------------
+
+    Why               :  a split asks whether a feature is below a threshold, and that question
+                         depends only on the ORDER of the values. Rescale income from rupees to
+                         lakhs and every row keeps its position in the ordering, so the same
+                         partitions are available and the same split is chosen. The threshold is
+                         simply reported in the new unit.
+
+    Invariant to      :  any monotonic transform of one feature - log, square root, rank,
+                         standardisation, min-max scaling. None of them change the order, so none of
+                         them change the tree.
+
+    NOT invariant to  :  rotating the feature space or combining features (see 2.5), and not to how
+                         you encode categoricals.
+
+> Real-world: a pipeline that standardises features before a logistic regression. Swap in a tree and
+  you can delete the scaler outright - one fewer artifact to fit, version and ship alongside the
+  model, and one fewer thing to get wrong at serving time.
+
+> Likely follow-up: "Does that make trees robust to outliers too?"
+  On the feature side, largely yes - an extreme x value just sits in the last bin and cannot drag a
+  threshold the way it drags a regression coefficient. On the target side of a regression tree, no:
+  one wild y value shifts the mean of whatever leaf it lands in.
