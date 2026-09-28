@@ -1,0 +1,270 @@
+5. REGULARIZATION AND PRUNING
+
+5.1 Why a fully grown tree memorizes noise
+------------------------------------------
+
+What "fully grown" means
+
+    No constraints at all. The tree keeps splitting until every leaf is pure - one class, often a
+    single row. Training accuracy is 100 percent by construction, which is exactly why it tells you
+    nothing.
+
+WHY THAT IS A PROBLEM
+
+    Noise splits too    :  a tree cannot tell signal from noise. It only sees "this split lowers
+                           impurity", and a coincidence in the training set lowers impurity just as
+                           well as a real pattern does.
+
+    Leaves get tiny     :  near the bottom a leaf may hold two or three rows. Its prediction is an
+                           estimate from three samples, reported with total confidence.
+
+    The boundary frays  :  every noise split adds another rectangle, so a few clean regions become a
+                           jagged patchwork traced around individual training points.
+
+    Variance explodes   :  those splits are pinned to particular rows, so resampling the data moves
+                           them. See 2.6.
+
+WATCHING IT HAPPEN
+
+     max_depth    leaves   train acc   test acc
+             2         4       0.785      0.751
+             3         8       0.809      0.762
+             5        25       0.855      0.800   <- best on unseen data
+             8        71       0.934      0.776
+            12       124       0.989      0.747
+          none       140       1.000      0.749
+
+    Train accuracy climbs all the way to 1.000 and never once warns you. Test accuracy peaks at
+    depth 5 and then falls back to where depth 2 was - the last 115 leaves were bought with noise.
+
+> Real-world: this is why "my model gets 100 percent on training data" is a red flag rather than a
+  result. For a tree it is not even an achievement - an unconstrained tree gets 100 percent on any
+  dataset where no two identical rows carry different labels.
+
+> Likely follow-up: "Can a fully grown tree ever be the right answer?"
+  Inside an ensemble, yes. Random Forest deliberately grows deep unpruned trees, because bagging is
+  there to kill the variance and you want each tree's bias low. On its own, almost never.
+
+
+5.2 Pre-pruning knobs: stopping the tree while it grows
+-------------------------------------------------------
+
+    Pre-pruning means refusing to split a node during training. The tree never gets large in the
+    first place, so it is the cheap option.
+
+THE KNOBS
+
+    max_depth              :  hard cap on levels from root to deepest leaf. The bluntest and most
+                              intuitive knob, and it caps memory and inference cost directly.
+
+    min_samples_split      :  a node needs at least this many rows before it is even considered for
+                              splitting. Self-adjusting: plenty of rows near the root so splitting
+                              continues, few near the bottom so it stops.
+
+    min_samples_leaf       :  every child must keep at least this many rows or the split is
+                              rejected. This is the one that kills single-outlier leaves and smooths
+                              regression output.
+
+    max_features           :  how many features are sampled and scanned at each node. Cuts training
+                              time directly - the scan is linear in features, see 4.6 - and stops
+                              one dominant feature driving every split.
+
+    min_impurity_decrease  :  a split must buy at least this much impurity drop or it is refused.
+
+WHICH DIRECTION TIGHTENS EACH ONE
+
+    knob                    to regularize   what it mainly buys
+    max_depth               decrease        speed, memory, a readable tree
+    min_samples_split       increase        no rules built on a handful of rows
+    min_samples_leaf        increase        smoother output, no single-outlier leaves
+    max_features            decrease        speed, and feature diversity
+    min_impurity_decrease   increase        only splits that pay for themselves
+
+WHICH ONE TO REACH FOR
+
+    Noisy data, outliers  :  min_samples_leaf, set to something like 10-50. An outlier then cannot
+                             claim a leaf of its own.
+
+    Choppy regression     :  min_samples_leaf again. A leaf predicts the mean, so more rows per leaf
+                             means a smoother surface.
+
+    Wide data, slow fits  :  max_features. The per-node scan is linear in features, so this is the
+                             knob that actually buys time.
+
+    Needs to be readable  :  max_depth at 3 to 5. Anything deeper stops being a thing a human reads.
+
+> Real-world: min_samples_leaf is the knob worth reaching for first on real data. max_depth is the
+  one everybody tunes, but it constrains the whole tree uniformly, while min_samples_leaf lets the
+  tree stay deep where there is data to support it and stop early where there is not.
+
+> Likely follow-up: "max_depth and min_samples_leaf both limit the tree. Why have both?"
+  They constrain different things. max_depth is global and blunt - it stops every branch at the same
+  level whether or not that branch had the data to keep going. min_samples_leaf is local and
+  adaptive, so a dense region of feature space can grow deep while a sparse one stops early. On
+  unbalanced data that difference is large.
+
+
+5.3 Post-pruning: cost-complexity pruning and ccp_alpha
+-------------------------------------------------------
+
+The idea
+
+    Grow the tree too big on purpose, then go back over it and ask of each branch: was that worth
+    keeping?
+
+
+EVERY BRANCH HAS A PRICE
+
+    Collapsing a branch back into a single leaf does two things at once:
+
+        training error goes UP      - you threw away some detail
+        leaf count goes DOWN        - the model got simpler
+
+    So each branch has a price - what that simplification cost you:
+
+        price  =  extra error from collapsing it  /  number of leaves you save
+
+    A cheap branch loses you almost no accuracy and saves several leaves, so cut it. An expensive
+    one costs a lot of accuracy to save one leaf, so keep it.
+
+    Example    :  two branches of the same tree
+
+                  branch A  -  4 leaves, 10 training mistakes.  As one leaf: 22 mistakes.
+                  branch B  -  3 leaves, 18 training mistakes.  As one leaf: 20 mistakes.
+
+                  A:  extra error 12,  leaves saved 3   ->  price = 4.0
+                  B:  extra error  2,  leaves saved 2   ->  price = 1.0
+
+                  Branch B is the cheaper cut, so branch B goes first.
+
+
+THE ALGORITHM
+
+    1.  Price every branch.
+    2.  Cut the cheapest one.
+    3.  Repeat until only the root is left.
+
+    That leaves you a list of trees, each smaller than the one before:
+
+        T0 (full)  ->  T1  ->  T2  ->  ...  ->  Tk (root only)
+
+    ccp_alpha is just where you stop on that list: cut every branch priced below alpha. So alpha =
+    0 keeps the full tree, and a large alpha cuts all the way down to a stump.
+
+    Note that you never search over tree shapes. The candidates are this single list, so tuning is
+    picking one point on it - which is why post-pruning has one knob and pre-pruning has four.
+
+
+WHY THE BOOKS WRITE IT AS  R_alpha(T) = R(T) + alpha * |T|
+
+    The same rule from the other side. Charge rent of alpha for every leaf the tree uses, then keep
+    whichever tree minimises error plus rent. R(T) is the training error, |T| is the leaf count.
+    A branch survives only if it earns more than alpha per leaf it occupies.
+
+
+THE SAME DATASET, PRUNED
+
+     ccp_alpha   leaves   train acc   cv acc   test acc
+       0.00000      140       1.000    0.739      0.749
+       0.00091      136       0.998    0.739      0.751
+       0.00169       87       0.963    0.758      0.751
+       0.00185       65       0.942    0.755      0.749
+       0.00472       14       0.850    0.778      0.784   <- best by CV
+       0.12459        1       0.505    0.635      0.504
+
+    140 leaves down to 14 - ten times smaller - and test accuracy goes UP, from 0.749 to 0.784.
+    Push alpha too far and the tree collapses to a stump that predicts one class for everything.
+
+
+IN SCIKIT-LEARN
+
+    path   = tree.cost_complexity_pruning_path(train_x, train_y)
+    alphas = path.ccp_alphas          # the branch prices, ascending
+    # fit one tree per alpha, score each by cross-validation, keep the best
+
+
+> Real-world: when someone asks for "the single best decision tree", this is the method that
+  answers them. You get a smaller tree than pre-pruning usually lands on, better held-out accuracy,
+  and one hyperparameter to defend instead of four.
+
+> Likely follow-up: "Can pruning ever improve training accuracy?"
+  Never. Every cut increases training error by construction - that is the price you are paying for
+  a simpler tree. In the table above training accuracy falls from 1.000 to 0.850 while test
+  accuracy rises. That is the trade working exactly as intended.
+
+
+5.4 Pre-pruning vs post-pruning, and the horizon effect
+-------------------------------------------------------
+
+    Pre-pruning   :  decides whether to split before seeing what would come below. Cheap, because
+                     the tree is never grown large.
+
+    Post-pruning  :  grows everything first, then decides with the whole subtree in view. More
+                     expensive, but far better informed.
+
+THE HORIZON EFFECT
+
+    A split that looks worthless on its own can be the one that makes the next two splits possible.
+    Pre-pruning stops there and never finds out. Post-pruning has already grown past it and can see
+    whether what followed was worth keeping.
+
+    This is the XOR problem from 2.4 wearing a different hat, and min_impurity_decrease is precisely
+    the knob that triggers it: set it above zero and any interaction whose first split looks flat
+    becomes unreachable.
+
+SIDE BY SIDE
+
+                    pre-pruning               post-pruning
+    decision made   during growth             after the tree is fully grown
+    cost            cheap - never grows big   grow everything, then cut
+    knobs to tune   4-5, and they interact    one (alpha), on a 1-D path
+    horizon effect  vulnerable                immune
+
+> Real-world: in practice most teams use both. Loose pre-pruning keeps training tractable on large
+  data - a max_depth of 20 or so, which is nowhere near binding - and then ccp_alpha does the real
+  work. Pre-pruning as a budget, post-pruning as the decision.
+
+> Likely follow-up: "If post-pruning is better informed, why does anyone pre-prune?"
+  Cost, mostly. Growing a full tree on millions of rows and then throwing most of it away is
+  wasteful, and on very wide data it may not fit in memory at all. Pre-pruning also gives you direct
+  control over inference latency, which post-pruning only gives you indirectly.
+
+
+5.5 Tuning the knobs with cross-validation
+------------------------------------------
+
+    The rule       :  none of these can be chosen on training data. A tree with no constraints
+                      always wins there - that is the definition of overfitting, not a tie-breaker.
+
+    What to score  :  the cross-validated score on held-out folds. The table in 5.3 shows why:
+                      training accuracy ranks the 140-leaf tree first and the correct answer last.
+
+A WORKABLE ORDER
+
+    1.  Plot train and validation score against max_depth. This alone tells you roughly
+        where overfitting starts and gives you a baseline to beat.
+    2.  Add min_samples_leaf. On noisy data this is the most improvement per unit of effort.
+    3.  Only then run a grid. max_depth x min_samples_leaf x min_samples_split is usually
+        enough - and it has to be a grid, because the knobs interact.
+    4.  Or skip the grid entirely and tune ccp_alpha, which is a single 1-D search.
+
+TWO THINGS THAT CATCH PEOPLE
+
+    One-standard-error rule  :  among the settings within one standard error of the best CV score,
+                                take the simplest tree. You give up almost no accuracy and gain
+                                interpretability and stability.
+
+    Leakage                  :  anything fitted on the data - encoders, imputers, and especially the
+                                target encoding from 4.4 - belongs inside the CV folds, not before
+                                them. Fit it outside and your CV score is optimistic and your chosen
+                                alpha is wrong.
+
+> Real-world: a candidate who says "I tuned max_depth until training accuracy stopped improving" has
+  said the quiet part out loud. Training accuracy never stops improving. The whole job of this
+  section is knowing which number you are allowed to look at.
+
+> Likely follow-up: "How many folds, and does it matter here?"
+  Five is the usual default and it is fine. It matters more than usual for trees because they are
+  high-variance - a single validation split can rank two settings wrongly just from which rows
+  landed where. If the CV scores across folds are widely spread, that spread is itself telling you
+  the tree is under-regularized.

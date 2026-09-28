@@ -1,0 +1,259 @@
+4. BUILDING THE TREE
+
+4.1 Finding the best split: scanning features against candidate thresholds
+--------------------------------------------------------------------------
+
+What happens at one node
+
+    The tree brute-forces it. Try each feature, try each candidate threshold on that feature, score
+    the two-way split it produces, keep the winner.
+
+THE PROCEDURE
+
+    best = none
+    for each feature j:
+        for each candidate threshold t on feature j:
+            left  = rows with x_j <= t
+            right = rows with x_j >  t
+            skip if either side is smaller than min_samples_leaf
+            score = impurity(parent) - weighted impurity(left, right)
+            if score > best:  remember (j, t)
+    return best
+
+THREE THINGS TO SAY ABOUT IT
+
+    Exhaustive  :  inside one node this is not a heuristic. Every (feature, threshold) pair is
+                   scored, so the split returned really is the best single split available there.
+
+    Greedy      :  the heuristic sits one level up - the node never asks what this split does to the
+                   splits below it. See 2.3 and 2.4.
+
+    Ties        :  when two candidates score identically the winner depends on iteration order.
+                   scikit-learn permutes the feature order using random_state, which is why two fits
+                   on identical data can differ.
+
+WORKED SCAN: 6 rows, one feature
+
+    hours   2   3   5   6   8   9
+    label   F   F   F   P   P   P
+
+    candidate thresholds are the midpoints: 2.5, 4, 5.5, 7, 8.5
+
+    t = 2.5  ->  left (1F)        right (2F,3P)     drop = 0.100
+    t = 4    ->  left (2F)        right (1F,3P)     drop = 0.250
+    t = 5.5  ->  left (3F)        right (3P)        drop = 0.500   <- winner, both sides pure
+    t = 7    ->  left (3F,1P)     right (2P)        drop = 0.250
+    t = 8.5  ->  left (3F,2P)     right (1P)        drop = 0.100
+
+> Real-world: this is the loop you would be asked to write on a whiteboard, and the guard that
+  catches people out is the min_samples_leaf check. Without it the scan happily returns a split that
+  puts one row on one side, which is pure, scores well, and is worthless.
+
+> Likely follow-up: "How many candidate splits does a single node evaluate?"
+  Roughly (number of features) x (distinct values per feature - 1). With 50 features and 10,000
+  mostly-distinct rows that is around half a million evaluations at the root alone - which is
+  exactly why the O(1) incremental update in 4.2 matters.
+
+
+4.2 Continuous features: sorting and testing midpoints
+------------------------------------------------------
+
+    Why midpoints  :  any threshold strictly between two adjacent distinct values produces exactly
+                      the same partition. The midpoint is just the canonical representative, and it
+                      sits furthest from both observed values, which generalises marginally better
+                      than putting the boundary on a training point.
+
+    Only between   :  identical values cannot be separated, so a feature with k distinct values
+                      offers exactly k - 1 candidate thresholds, not n - 1.
+
+    The sort       :  sort the rows by the feature once. Everything after that is a single left-to-
+                      right pass.
+
+    The sweep      :  walk the threshold rightwards one row at a time, moving that row from the
+                      right child to the left child and updating running class counts. Each
+                      candidate then costs O(1) instead of O(n).
+
+    sorted by hours ->    2     3     5  |  6     8     9
+                          F     F     F  |  P     P     P
+                                         ^
+                                    threshold 5.5
+
+    left  F=3 P=0          right F=0 P=3
+
+    step the threshold one row to the right and both counts update in O(1):
+    left  F=3 P=1          right F=0 P=2       - no need to re-scan the node
+
+> Real-world: the sweep is the difference between a from-scratch tree that trains in seconds and one
+  that takes minutes. Recomputing both children's impurity from scratch at every threshold is the
+  single most common performance mistake in a hand-rolled implementation.
+
+> Likely follow-up: "Why not just test every observed value as a threshold?"
+  You would get the same set of partitions, so it is wasted work - and the boundary would then sit
+  exactly on a training point rather than between two of them. Same tree, slightly worse
+  generalisation, more compute.
+
+
+4.3 Categorical features: binary vs multiway splits, and high cardinality
+-------------------------------------------------------------------------
+
+    Multiway          :  one branch per category (ID3, C4.5). Simple, but it shatters the data in a
+                         single step, and the feature is then used up - nothing below that node can
+                         split on it again.
+
+    Binary            :  CART groups the categories into two sets instead. With k categories there
+                         are 2^(k-1) - 1 non-trivial ways to do that, which is exponential in k.
+
+    The shortcut      :  for two-class problems, and for regression with squared error, sort the
+                         categories by their proportion of class 1 (or their mean target) and test
+                         only the k - 1 cut points along that order. This is provably optimal, and
+                         turns the exponential search into a linear one.
+
+    Multiclass        :  no equivalent shortcut exists, so implementations fall back to heuristics.
+
+    High cardinality  :  many categories means many candidate partitions, which means more chances
+                         to fit noise - and few rows behind each level. This is the same bias as
+                         3.4, arriving by a different route.
+
+> Real-world: zip code, product SKU, user agent string - thousands of levels each. A tree given the
+  raw column will find a partition that separates the training set beautifully and means nothing,
+  because most levels were seen a handful of times.
+
+> Likely follow-up: "Does scikit-learn handle categorical features natively?"
+  Not in DecisionTreeClassifier or DecisionTreeRegressor - you have to encode them yourself.
+  HistGradientBoosting has a categorical_features argument, LightGBM has categorical_feature, and
+  CatBoost is built around it. That gap in plain sklearn is exactly why 4.4 is a practical problem
+  and not a theoretical one.
+
+
+4.4 One-hot vs ordinal encoding, and why trees dislike one-hot
+--------------------------------------------------------------
+
+    One-hot      :  k binary columns. Every split can then only ask "is it category j, or not" - a
+                    one-vs-rest cut. Isolating a group of three categories costs three levels of
+                    depth.
+
+    Weak splits  :  a rare category's column is almost all zeros, so splitting on it barely moves
+                    impurity and it never wins the scan.
+
+    Dilution     :  with max_features subsampling, one informative categorical becomes k weak
+                    columns competing for the same slot, so the chance of picking any of them drops.
+
+    Ordinal      :  one column, k - 1 thresholds. The tree can carve out groups with consecutive
+                    cuts, so it recovers far more with far less depth.
+
+    goal: send categories {A, C, E} down the same branch, out of {A, B, C, D, E}
+
+    ONE-HOT                                    ORDINAL  (codes A=0  C=1  E=2  B=3  D=4)
+
+        is_A = 1 ?                                 code <= 2 ?
+        |       \                                  |         \
+        no      yes --> in                         yes        no
+        |                                          |          |
+        is_C = 1 ?                                 in         out
+        |       \
+        no      yes --> in
+        |
+        is_E = 1 ?
+        |       \
+        no      yes --> in
+        |
+        out
+
+    three levels of depth burned               one split, done
+
+    The catch        :  the code order is arbitrary, so categories that belong together may not be
+                        adjacent - then the tree needs two or three cuts instead of one. Still
+                        nothing like the depth one-hot costs.
+
+    Target encoding  :  replace each category with its mean target. That puts the categories in
+                        exactly the order the shortcut in 4.3 wants, which is why it works so well -
+                        and why it leaks unless you compute it out-of-fold.
+
+> Real-world: a churn model with a 200-level city column. One-hot gives 200 near-empty columns that
+  each lose the split scan; ordinal gives one column the tree can actually cut. The fastest real win
+  is usually target encoding computed out-of-fold, or handing the raw column to LightGBM and letting
+  it do the grouping.
+
+> Likely follow-up: "So you should never one-hot encode for a tree?"
+  Below about ten categories it barely matters, and one-hot keeps the fitted tree readable. The
+  damage is at high cardinality, where it both dilutes every split and eats depth. And this is a
+  tree-specific concern - for a linear model one-hot is still the right answer, because a linear
+  model genuinely cannot use an arbitrary ordering.
+
+
+4.5 Stopping conditions and the leaf prediction rule
+----------------------------------------------------
+
+A NODE BECOMES A LEAF WHEN ANY ONE OF THESE FIRES
+
+    Pure             :  every row in the node has the same label. There is nothing left to gain.
+
+    Depth            :  the node is already at max_depth.
+
+    Too few rows     :  fewer than min_samples_split rows reached it.
+
+    Child too small  :  every candidate split would leave a child under min_samples_leaf.
+
+    No gain          :  the best available split has an impurity drop of zero, or below
+                        min_impurity_decrease.
+
+    No features      :  every feature is constant within the node, so there is nothing to split on.
+
+    The first four are the pre-pruning knobs from group 1.4. The last two are structural - they fire
+    whether or not you set anything.
+
+THE LEAF PREDICTION RULE
+
+    Classification  :  the majority class among the rows that reached the leaf. predict_proba
+                       returns that leaf's class proportions.
+
+    Regression      :  the mean of the targets that reached the leaf.
+
+    Why those two   :  each is the constant that minimises the criterion you grew with - see 3.5.
+                       Change the criterion and the leaf rule has to change with it.
+
+> Real-world: a fully grown tree has pure leaves, so predict_proba comes back as exactly 0.0 or 1.0
+  for most rows. If anything downstream thresholds on a probability, ranks by it, or feeds it into
+  an expected-value calculation, that output is useless even though accuracy looks fine.
+
+> Likely follow-up: "Your tree's predict_proba returns 1.0 for most rows. Why, and does it matter?"
+  Because a leaf just reports its own class proportions, and a fully grown tree's leaves are pure -
+  1.0 here means "all three training rows in this leaf were positive", not "certain". It matters
+  whenever the score is used as a probability rather than a label. Fix it by raising
+  min_samples_leaf so leaves hold enough rows to estimate a rate, or by calibrating the output.
+
+
+4.6 Training cost O(m n log n), inference cost O(depth)
+-------------------------------------------------------
+
+    Notation    :  m = number of features, n = number of rows.
+
+    Per node    :  once the rows sit in sorted order, scoring every candidate threshold across every
+                   feature costs O(m * n_node) thanks to the O(1) sweep from 4.2.
+
+    Per level   :  all the nodes at one depth hold n rows between them, however the data was split,
+                   so a whole level costs O(m * n).
+
+    The sort    :  sort each feature once up front - O(m * n log n) - and carry the order down as
+                   you split. Re-sorting inside every node instead pushes the total to O(m n log^2
+                   n).
+
+    Total       :  O(m n log n): the up-front sort, plus O(m n) per level across the O(log n) levels
+                   of a reasonably balanced tree.
+
+    Worst case  :  a degenerate tree that peels off one row at a time is n levels deep, giving O(m
+                   n^2). Depth and leaf-size limits are what keep you away from it.
+
+    Inference   :  O(depth) comparisons per row, so O(log n) when balanced. No matrix multiply, no
+                   distance computation - just a walk down a few if-statements.
+
+    Memory      :  O(number of nodes), and an unpruned tree's node count approaches n.
+
+> Real-world: a 500-tree forest at depth 10 costs about 5,000 comparisons per prediction and still
+  serves in well under a millisecond on one core. Cheap inference is a large part of why gradient-
+  boosted trees, not neural networks, sit behind so much production ranking and risk scoring.
+
+> Likely follow-up: "What dominates the cost when your data is very wide?"
+  m does. The scan is linear in features at every single node, so going from 100 to 10,000 columns
+  hurts far more than a 10x increase in rows. That is the second thing max_features buys you in a
+  Random Forest - it caps the per-node scan, so it is a speed knob as much as a decorrelation knob.

@@ -1,3 +1,0 @@
-Roadmap: Neural_Networks
-
-TODO: fill in learning plan (concepts to cover, order, scratch implementation targets).

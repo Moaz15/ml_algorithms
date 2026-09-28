@@ -177,16 +177,16 @@ and that is roughly the whole story.
 3.4 Gain ratio, and the bias toward high-cardinality features
 -------------------------------------------------------------
 
-Raw information gain has a structural bias: it loves features with many distinct values. Split on a
-customer ID and every child holds a single row, so every child is perfectly pure and the gain is as
-large as it can possibly be - the tree has learned a lookup table that generalizes to nothing.
-C4.5's fix is gain ratio: divide the gain by the split's own entropy, a quantity that measures only
-how much the split fragments the data and ignores the labels entirely. A thousand-way split has
-enormous split information, so dividing by it collapses the score. CART dodges the worst of this
-differently, by only ever splitting in two, so no single split can fragment into a thousand
-children. The bias does not disappear though - a feature with more distinct values still offers more
-candidate thresholds and wins more ties, which is the same bias that later shows up in impurity-
-based feature importance.
+Information gain favours features with many distinct values. Split on a customer ID: every child
+holds one row, every child is pure, and the gain is the largest possible. The tree has memorized a
+lookup table that generalizes to nothing.
+
+C4.5 fixes this with gain ratio - the gain divided by the split's own entropy. That denominator
+looks only at how many pieces the split breaks the data into, ignoring the labels, so a thousand-way
+split carries a huge denominator and its score collapses. CART avoids the worst case by only ever
+splitting in two. Neither fully removes the bias: a feature with more distinct values still offers
+more candidate thresholds and wins more ties, and that same bias resurfaces in impurity-based
+feature importance.
 
 > Real-world: any table that still has an ID column, a raw timestamp or a hash sitting in it.
   Information gain will happily make it the root, training accuracy will hit 100 percent, and
@@ -225,27 +225,27 @@ leaf rule are one decision stated twice.
 ------------------------------------------------------------
 
 The obvious criterion is the one you actually care about: what fraction of this node would I get
-wrong if I predicted its majority class? It turns out to be a bad thing to grow a tree with. Error
-rate is piecewise linear in the class proportions rather than strictly concave, which makes it
-insensitive to changes that are real progress. A split can make one child dramatically purer while
-the error rate registers no improvement at all, and a greedy search that sees zero gain has no
-reason to take it. Gini and entropy are strictly concave, so any split whose children are purer than
-their parent scores positive.
+wrong if I predicted its majority class? It is a poor thing to grow with, because it counts only the
+rows on the losing side of the vote - make a child more lopsided without flipping which class wins
+and that count does not move, so the split scores zero and a greedy search skips it. The geometry
+says the same thing: error rate is min(p, 1-p), a pair of straight lines, and along a straight line
+a parent already equals the weighted average of its children. Gini and entropy bow upward instead,
+so the parent sits strictly above that average and any split whose children differ in class mix at
+all scores positive.
 
               children                        error rate   weighted gini
     parent    400 A / 400 B                        0.500           0.500
     split A   (300A,100B) and (100A,300B)          0.250           0.375
     split B   (200A,400B) and (200A,  0B)          0.250           0.333
 
-    Error rate scores A and B identically. Gini prefers B - correctly, because B has
-    already finished one branch with a pure leaf.
+    Both splits take the node from 400 wrong rows to 200, so error rate calls them equal. Gini
+    prefers B - it has already finished one branch as a pure leaf, which error rate cannot see.
 
-> Real-world: this is why the criterion you grow with and the metric you report are different
-  things, and that is not a contradiction. Growing needs a score sensitive enough to reward partial
-  progress toward a pure leaf. Reporting only has to describe the finished model, so accuracy, AUC
-  or whatever the business cares about belongs there instead.
+> Real-world: this is why the criterion you grow with and the metric you report are allowed to
+  differ. Growing needs a score that rewards partial progress toward a pure leaf; reporting only has
+  to describe the finished model, so accuracy, AUC or whatever the business tracks belongs there.
 
 > Likely follow-up: "So is error rate ever the right criterion?"
-  Yes - for pruning. Cost-complexity pruning compares whole finished subtrees against each other
-  rather than searching for the next incremental split, so the bluntness that made error rate
-  useless for growing stops mattering there.
+  Yes - for pruning. Cost-complexity pruning compares whole finished subtrees rather than hunting
+  for the next incremental split, and error rate is a fine way to compare finished things. Its
+  bluntness only hurt while growing.

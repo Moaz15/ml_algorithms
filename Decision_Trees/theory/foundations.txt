@@ -207,7 +207,7 @@ DEPTH IS THE DIAL
   tuning one of them harder.
 
 
-2.7 Why no feature scaling is needed
+2.7 Why no feature scaling is needed : 
 ------------------------------------
 
     Why               :  a split asks whether a feature is below a threshold, and that question
@@ -231,3 +231,5 @@ DEPTH IS THE DIAL
   On the feature side, largely yes - an extreme x value just sits in the last bin and cannot drag a
   threshold the way it drags a regression coefficient. On the target side of a regression tree, no:
   one wild y value shifts the mean of whatever leaf it lands in.
+
+

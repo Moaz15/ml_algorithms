@@ -1,0 +1,334 @@
+6. FAILURE MODES
+
+6.1 Instability: a small data change produces a completely different tree
+-------------------------------------------------------------------------
+
+What happens
+
+    Refit the tree on a slightly different sample of the same data and you get a different tree.
+    Different root, different rules, a different story about what matters.
+
+WHY: THE ROOT SPLIT IS OFTEN A NEAR-TIE
+
+    The scan keeps one winner and throws the rest away. That is fine when one feature is clearly
+    best. It is fragile when two are close.
+
+    Best root split available on each feature, on the full training set:
+
+        twin_a          0.343
+        twin_b          0.368     <- wins, by 0.025
+        distractor      0.015
+
+    twin_a and twin_b carry nearly the same information, so they score nearly the same - a gap of
+    0.025, next to a distractor sitting 25 times further back. Resample the rows and a gap that
+    small moves around easily. Across 40 resamples the closest it ever got was 0.003, and 6 times
+    twin_a won instead.
+
+    Then remember the root is permanent (see 2.3). Flip that one near-coin-toss and every split
+    beneath it is chosen on a different subset of rows, so the entire tree is rewritten.
+
+
+MEASURING IT
+
+    40 bootstrap refits of the same dataset:
+
+    what changes a lot
+        root feature chosen      twin_b 34/40,  twin_a 6/40
+        tree depth               5 to 6
+        leaf count               10 to 21
+
+    what barely changes
+        test accuracy            0.919 +/- 0.017
+        pairwise disagreement    6.1% of test rows
+
+    So the explanation is unstable while the predictions are not. The tree stays about as right as
+    it was - it just keeps giving a different reason for being right.
+
+
+> Real-world: you present the tree in a model review, someone asks why twin_b is at the top, and
+  next month's refit puts twin_a there instead. Nothing was wrong either time - the two features
+  carry the same information and the tree had to pick one. But the story you told is now
+  unsupportable. A runnable version of this is Q11 in code/practice.ipynb.
+
+> Likely follow-up: "How do you get a stable story out of a tree, then?"
+  Not from one tree's structure. Refit on bootstrap samples and report how often each feature shows
+  up near the top - which is essentially what a Random Forest's importance is doing - or use
+  permutation importance or SHAP, which describe the predictions rather than the shape of the tree.
+
+
+6.2 Axis-alignment: diagonal boundaries need a staircase of splits
+------------------------------------------------------------------
+
+    The geometry is in 2.5: every split is "feature_j <= t", a cut perpendicular to one axis, so the
+    boundary can only ever be a staircase. What matters here is what that costs you.
+
+MEASURING IT
+
+    the true boundary is exactly diagonal: label = 1 when x2 > x1
+
+        model                        test acc   leaves
+        logistic regression             0.998        -
+        tree, max_depth 2               0.890        4
+        tree, max_depth 4               0.963       15
+        tree, max_depth 6               0.982       33
+        tree, unlimited depth           0.980       37
+        tree, depth 2, + (x2 - x1)      1.000        2
+
+    37 leaves to approximate one straight line, and it still loses to a logistic regression with two
+    coefficients. Then hand the tree the difference x2 - x1 as a column and depth 2 gets it exactly,
+    with two leaves.
+
+WHAT TO DO
+
+    Detect it  :  fit a linear model on the same features. If it beats a well-tuned tree, your
+                  boundary is probably close to linear and the tree is spending its depth budget on
+                  stairs.
+
+    Fix it     :  engineer the combination the boundary actually uses - a difference, a ratio, a
+                  rate. One good column beats thirty splits.
+
+    Or rotate  :  PCA aligns the data with its own axes, which helps the tree, but you lose the
+                  interpretability that made you pick a tree.
+
+> Real-world: a fraud rule like "flag it if the amount is more than twice this customer's usual
+  amount" is a diagonal in (amount, usual_amount) space. Teams routinely throw depth at it when a
+  single ratio column would have ended the problem.
+
+> Likely follow-up: "Doesn't a deeper tree eventually fix this?"
+  No, and the table shows it - unlimited depth scores no better than depth 6, it just adds leaves.
+  The staircase only converges to the diagonal in the limit of infinite data; with a finite sample
+  the extra steps are fitting noise, so you pay variance for nothing.
+
+
+6.3 Regression trees cannot extrapolate beyond the training range
+-----------------------------------------------------------------
+
+The problem, in one line
+
+    A regression tree can never output a number outside the range of the targets it was trained
+    on. Not rarely - never.
+
+
+WHY
+
+    A tree's prediction is just the constant stored in whichever leaf you land in, and every leaf
+    value is an average of training targets. So the biggest number the tree can ever say is the
+    biggest leaf average - and no input, however extreme, can push it past that.
+
+    The leaf at the top end has no upper boundary. It covers everything from its threshold upwards,
+    so x = 12, x = 15 and x = 20 all land in the same leaf and get the same answer. The bottom end
+    is flat for the same reason.
+
+    This is structural, not a setting you got wrong. More depth, more training data inside the
+    range, a different criterion - none of them move the flat tail.
+
+
+MEASURING IT
+
+    trained on x in [0, 10] where the true relationship is y = 2x
+
+             x    true y   tree says
+           8.0      16.0       15.46
+          10.0      20.0       20.49   <- edge of the training range
+          12.0      24.0       20.49
+          15.0      30.0       20.49
+          20.0      40.0       20.49
+
+    Inside the range the tree tracks y = 2x well. Past the edge it stops dead: at x = 20 the truth
+    is 40 and the tree still says 20.49 - which is simply the largest leaf average it has, and the
+    largest training target was 20.98.
+
+
+> Real-world: any trending series - revenue, user counts, prices. A tree trained through last
+  quarter will predict last quarter's ceiling forever. The usual fix is to model the trend
+  separately, fit the tree on the detrended residuals, then add the trend back. Q12 in
+  code/practice.ipynb runs this.
+
+> Likely follow-up: "Does Random Forest or XGBoost fix it?"
+  No. Every tree in the ensemble has the same flat tail, and averaging flat tails gives you a flat
+  tail - boosting adds flat tails together and gets one too. This is the one tree failure mode that
+  ensembling cannot touch, which is why linear models still win on extrapolative forecasting.
+
+
+6.4 Missing values: surrogate splits in CART vs learned default directions
+--------------------------------------------------------------------------
+
+The problem, in one line
+
+    A split asks "is x <= t?". If x is missing, that question has no answer - the row cannot go
+    left and it cannot go right. Something has to decide for it.
+
+
+THREE WAYS TO DECIDE
+
+    Fill it in first   :  impute the missing value - mean, median, whatever - so the question has an
+                          answer again. This is the old default, and it is the worst of the three.
+
+    Surrogate splits   :  CART's answer, and R's rpart still does it. Alongside the real split,
+                          store backup splits on other features that partition the rows almost the
+                          same way; if the real feature is missing, ask the best available backup
+                          instead. Accurate, but you compute and store extra splits at every node.
+
+    Learned direction  :  what XGBoost, LightGBM and scikit-learn 1.3+ do. During the scan, try
+                          sending every missing row left, then try sending them all right, and keep
+                          whichever scores better. The tree simply learns which way they go, and it
+                          costs almost nothing because the scan was running anyway.
+
+
+MEASURING IT
+
+    The same feature, the same 60 rows made missing. Only the labels on those rows differ.
+
+        missing rows are labelled 1   ->   tree predicts 1 for a missing input
+        missing rows are labelled 0   ->   tree predicts 0 for a missing input
+
+    Nothing was filled in, and the answer flipped with the data. The tree learned which way to send
+    the missing rows, which is exactly what it means to treat missingness as signal rather than as a
+    gap to be patched.
+
+
+THE TRAP
+
+    Imputing with the mean invents a value that was never observed, piles a spike of rows onto it,
+    and then lets the tree split on that spike. Worse, it erases the fact that the value was missing
+    at all - and missingness is often the most predictive thing in the row. If you must impute, add
+    a was_missing indicator column alongside it.
+
+
+> Real-world: a loan application where income is blank. That blank is not random noise - it
+  correlates with the outcome, often strongly. Mean-imputing it hands the model a plausible-looking
+  income and throws away the signal that the applicant did not give one.
+
+> Likely follow-up: "Is mean imputation ever fine for a tree?"
+  When values really are missing completely at random and the rate is low, it is harmless. The
+  moment missingness correlates with the target - which is most real data - you have deleted a
+  useful feature and added a fake spike for the tree to split on. The indicator column costs one
+  column and protects you either way.
+
+
+6.5 Class imbalance: class_weight and threshold tuning
+------------------------------------------------------
+
+The problem, in one line
+
+    When 98% of your rows are one class, predicting that class for everything is already 98%
+    accurate. The tree discovers this and stops there.
+
+
+WHY
+
+    A split only gets chosen if it lowers impurity. When a node is already 98 percent one class its
+    impurity is barely above zero, so there is almost nothing left to remove. A split that correctly
+    isolates a small pocket of positives moves that number by a rounding error, and loses the scan
+    to a split that carves up the majority instead.
+
+    So the minority never gets a leaf of its own. Every leaf votes majority, and the tree predicts
+    the majority everywhere - while reporting excellent accuracy, because on this data that IS
+    excellent accuracy.
+
+    min_samples_leaf makes it worse. At 2 percent positives, a 50-row leaf can only vote positive if
+    the pocket is unusually dense.
+
+
+MEASURING IT
+
+    2% of rows are positive, and the signal is weak
+
+    setting                     accuracy   recall  precision  flagged
+    default                        0.980    0.000      0.000        0
+    class_weight='balanced'        0.773    0.722      0.061      425
+    default, threshold 0.05        0.874    0.556      0.087      230
+
+    The default tree flags 0 rows. Not a few - none. Recall is exactly zero while accuracy reads
+    0.980, which is the whole trap in one line.
+
+
+THE TWO FIXES, AND WHAT EACH ACTUALLY CHANGES
+
+    class_weight      :  weights the rows inside the impurity calculation, so one minority row
+                         counts for many. That changes which splits win the scan, so you get a
+                         different tree.
+
+    threshold tuning  :  leaves the tree exactly as it is and stops using 0.5 as the cut on
+                         predict_proba. Same tree, different decision.
+
+    Both find real positives and both cost precision. That trade is the actual decision, and it
+    belongs to whoever owns the cost of a false alarm downstream.
+
+
+> Real-world: fraud, churn, defect detection, rare disease - the positive class is the whole point
+  and it is always the small one. Reporting accuracy on any of these is how a model that has never
+  flagged a single case gets signed off.
+
+> Likely follow-up: "class_weight or threshold tuning - which one?"
+  Start with the threshold. It is reversible, it costs one line, and you can pick the operating
+  point after seeing the precision-recall curve rather than guessing beforehand. Reach for
+  class_weight when the tree is not even finding minority-relevant splits to score - at that point
+  no threshold can help you, because the information is not in the tree.
+
+
+6.6 Bias toward features with many distinct values
+--------------------------------------------------
+
+The problem, in one line
+
+    A feature with more distinct values gets more chances to look good, so the tree prefers it -
+    even when the feature means nothing at all.
+
+
+WHY
+
+    Every distinct value is one more threshold the scan can try. A binary column offers exactly one
+    place to cut. A column of 2000 unique numbers offers 1999.
+
+    So the high-cardinality column enters the scan with 1999 tickets and the binary column with one.
+    Even when its numbers are pure noise, one of those 1999 cuts will happen to separate the rows in
+    front of it better than the single honest cut does - by luck alone. It wins, and it keeps
+    winning, all the way down the tree.
+
+
+TWO WAYS IT HURTS YOU
+
+    It wins the root       :  an ID, a raw timestamp or a hash left in the table gets chosen first,
+                              splits the data into near-singletons, and hands you perfect training
+                              accuracy that transfers to nothing.
+
+    It poisons importance  :  feature_importances_ is computed on training data and sums impurity
+                              drops, so it rewards whatever gets used most often and deepest - which
+                              is exactly what a high-cardinality column does.
+
+
+MEASURING IT
+
+    Three binary features actually drive the label. random_noise drives nothing.
+
+    feature           distinct values      MDI   permutation
+    random_noise                 2000    0.386         0.011   <- pure noise
+    binary_b                        2    0.244         0.160
+    binary_a                        2    0.216         0.144
+    binary_c                        2    0.154         0.175
+
+    random_noise carries no information whatsoever, and MDI still ranks it first with more credit
+    than any real feature. Permutation importance, measured on held-out data, correctly puts it at
+    roughly zero.
+
+
+WHAT TO DO
+
+    Detect  :  compare MDI against permutation importance, and check the cardinality of whatever
+               sits at the top of your importance list.
+
+    Fix     :  drop identifiers before training, report importance with permutation or SHAP rather
+               than MDI, and target-encode genuine high-cardinality categoricals out-of-fold.
+
+
+> Real-world: this is the single most common way a tree model looks brilliant in a notebook and dies
+  in production. Someone leaves customer_id or created_at in the frame, the tree memorises it, and
+  cross-validation does not catch it because the same IDs appear in every fold. Q9 in
+  code/practice.ipynb reproduces it.
+
+> Likely follow-up: "Why does MDI get it so wrong?"
+  Two things compounding. It is measured on training data, where the noise column genuinely does
+  reduce impurity - that is what overfitting means. And it accumulates over every use of the
+  feature, so a column with that many thresholds keeps winning deep in the tree where nodes are
+  small and almost any cut looks like progress.
