@@ -1,0 +1,453 @@
+BOOSTING - 1.8 COMPARISONS AND INTERVIEW GOTCHAS
+================================================================================
+The last file in the boosting track. Nothing new is introduced here - this is
+where the earlier files get turned into answers you can say out loud in under
+two minutes.
+
+HOW TO USE THIS FILE
+--------------------
+Each section is a question a panel actually asks, followed by the short answer,
+then the reasoning, then the follow-up they will ask next. If you can only
+revise one file before an interview, revise this one and foundations.txt.
+
+
+================================================================================
+1) RANDOM FOREST VS GRADIENT BOOSTED TREES
+================================================================================
+
+1.1 The short answer
+--------------------
+"Both are tree ensembles, but they attack opposite problems. Random Forest
+averages independent deep trees to kill VARIANCE. Boosting sums dependent
+shallow trees to kill BIAS. That single difference explains every other
+difference between them."
+
+1.2 The table
+-------------
+                           RANDOM FOREST            GBDT
+    ----------------------------------------------------------------------
+    Trees are              independent, parallel    sequential, dependent
+    Attacks                variance                 bias
+    Base tree              deep, unpruned           shallow (depth 3-8)
+    Accuracy (tuned)       good                     usually BETTER on tabular
+    Accuracy (untuned)     good                     can be much worse
+    Tuning sensitivity     forgiving (n_estimators  sensitive (nu, M, depth,
+                           and mtry, roughly)       subsample, penalties)
+    Risk of overfitting    low; more trees is safe  real; more trees can hurt
+    Training               embarrassingly parallel  sequential rounds
+    Training cost          many deep trees          many cheap shallow trees,
+                                                    often FASTER in wall-clock
+                                                    with hist methods
+    Inference cost         deep trees, slower       shallow trees, faster
+    Noisy labels           robust                   fragile (chases them)
+    Free validation        OOB score, no split      none; needs a real split
+    Probabilities          decent, often under-     good with log loss, but
+                           confident at the extremes see failure_modes.txt 5
+    Number of knobs        few                      many
+
+1.3 What to ship
+----------------
+    SHIP GBDT when: accuracy matters, labels are reasonably clean, and you have
+    the time and the validation discipline to tune and monitor it. This is most
+    tabular production systems.
+
+    SHIP RANDOM FOREST when: you need a strong result with almost no tuning,
+    the labels are noisy, you want OOB estimates without a holdout, or the
+    model will be maintained by people who will not retune it. It is also the
+    better BASELINE - if your boosted model cannot beat a default RF, something
+    is wrong with your setup, not with boosting.
+
+1.4 The follow-up
+-----------------
+"If GBDT is usually more accurate, why does anyone still use Random Forest?"
+Because the gap after tuning is often small, RF has far fewer ways to go
+wrong, and a model that nobody can break is worth more than two points of AUC
+that depend on a validation split somebody will eventually misuse.
+
+
+================================================================================
+2) WHY BOOSTING WANTS SHALLOW TREES AND RANDOM FOREST WANTS DEEP ONES
+================================================================================
+
+2.1 The short answer
+--------------------
+"Each ensemble should supply what its combination rule cannot fix. Averaging
+removes variance but not bias, so RF needs trees with LOW BIAS - grow them deep.
+Summing sequentially removes bias but has no mechanism to remove variance, so
+boosting needs trees with LOW VARIANCE - keep them shallow."
+
+2.2 The reasoning, both directions
+----------------------------------
+    RANDOM FOREST
+      Combination rule: average B independent trees.
+      What averaging fixes:        variance (foundations.txt section 1)
+      What averaging cannot fix:   bias - E[average] = E[one tree]
+      Therefore:                   the base tree must have low bias already
+      Low bias means:              DEEP, unpruned, fit the training data hard
+      The resulting variance is fine, because averaging is about to remove it.
+
+    BOOSTING
+      Combination rule: add trees sequentially, each fitted to the remainder.
+      What the sequence fixes:     bias - that is what each round reduces
+      What the sequence cannot fix: variance - trees are SUMMED, not averaged,
+                                   so a noisy tree's mistake stays in the model
+      Therefore:                   the base tree must have low variance already
+      Low variance means:          SHALLOW, high-bias, deliberately inadequate
+      The resulting bias is fine, because the next 500 rounds will remove it.
+
+2.3 The second reason, specific to boosting
+-------------------------------------------
+A deep tree would fit the current pseudo-residuals almost exactly in round 1,
+leaving nothing for round 2 (foundations.txt section 4.1). Boosting requires
+each step to be insufficient. There is no analogous requirement in bagging -
+each tree is meant to be as good as possible.
+
+2.4 Why this question is asked so often
+---------------------------------------
+Because it is impossible to answer correctly by memorisation. Either you
+understand that averaging and summing fix different things, or you do not.
+
+
+================================================================================
+3) ADABOOST VS GRADIENT BOOSTING: IS ONE A SPECIAL CASE OF THE OTHER?
+================================================================================
+
+3.1 The short answer
+--------------------
+"Essentially yes. Both are forward stagewise additive models. AdaBoost is the
+instance you get with exponential loss, and gradient boosting generalises the
+scheme to any differentiable loss by fitting each tree to the negative gradient.
+They are not line-by-line identical implementations, but AdaBoost is correctly
+described as the exponential-loss case."
+
+3.2 The side-by-side
+--------------------
+                        ADABOOST                 GRADIENT BOOSTING
+    -----------------------------------------------------------------------
+    Framework           forward stagewise        forward stagewise
+                        additive modelling       additive modelling
+    Loss                exponential, fixed       ANY differentiable loss
+                        exp(-y*F)
+    How the next
+    learner is steered  REWEIGHT the rows        fit to the NEGATIVE GRADIENT
+                        (w = exp(-y*F))          (pseudo-residuals)
+    Learner weight      alpha from a closed      shrinkage nu, plus per-leaf
+                        form, exact line search  values solved against the loss
+    Labels              {-1, +1}                 anything (real, counts,
+                                                 probabilities, quantiles)
+    Robustness          poor (exponential loss)  depends on the chosen loss
+    Typical base        decision stumps          depth 3-8 trees
+
+3.3 The nuance, if they push
+----------------------------
+The reweighting and the gradient view coincide under exponential loss: the
+weight exp(-y*F_(m-1)) IS the exponential loss evaluated at the current model,
+and the pseudo-residual of exponential loss is y*exp(-y*F), which points in the
+same direction. The differences that remain are mechanical - AdaBoost solves
+for alpha exactly, while gradient boosting takes a fixed shrinkage step and
+re-solves leaf values; and AdaBoost's base learner is fitted to weighted
+CLASSIFICATION, while gradient boosting always fits a REGRESSION tree to
+real-valued targets.
+
+3.4 The follow-up
+-----------------
+"So why did gradient boosting replace it?" Because fixing the loss to
+exponential fixes three things at once: you cannot do regression, you cannot
+get calibrated probabilities, and you inherit exponential loss's extreme
+fragility to mislabeled rows (adaboost.txt section 4). Freeing the loss removed
+all three limits in one move.
+
+
+================================================================================
+4) GRADIENT BOOSTING VS DEEP LEARNING ON TABULAR DATA
+================================================================================
+
+4.1 The short answer
+--------------------
+"On small-to-medium heterogeneous tabular data, GBDT still usually wins, and
+with far less tuning. Deep learning takes over when the data is very large,
+when categoricals are high-cardinality enough to want learned embeddings, when
+the tabular data has to be fused with text or images, or when you need
+pretraining or an end-to-end differentiable pipeline."
+
+4.2 Why trees win on tabular
+----------------------------
+  - TABULAR TARGETS ARE OFTEN NON-SMOOTH. Real functions have cliffs - a credit
+    policy changes at a threshold, a shipping cost jumps at a weight boundary.
+    Trees are built from steps and model that for free. MLPs are biased toward
+    smooth functions and have to spend capacity approximating a jump.
+  - IRRELEVANT FEATURES ARE FREE. A tree simply never splits on a useless
+    column. A dense layer multiplies every input by a weight and must learn to
+    zero it out, which costs data.
+  - NO PREPROCESSING. Mixed scales, skewed distributions, monotone transforms:
+    all irrelevant to a tree. Neural nets need normalisation to train at all.
+  - ROTATION INVARIANCE IS THE WRONG PRIOR. An MLP is roughly invariant to
+    rotations of the feature space, but in tabular data the individual COLUMNS
+    are meaningful - "age" is a real thing and "0.3*age + 0.7*income" is not.
+    Trees are axis-aligned, which matches the data. (Grinsztajn et al., 2022
+    make this the central argument.)
+  - MISSING VALUES AND CATEGORIES are handled natively (xgboost.txt section 6,
+    lightgbm_catboost.txt section 5).
+
+4.3 When deep learning wins
+---------------------------
+  - Very large datasets (tens of millions of rows and up) where the extra
+    capacity can be fed.
+  - High-cardinality categoricals where learned EMBEDDINGS capture similarity
+    between levels - trees treat levels as unordered symbols with no notion of
+    "these two products are alike".
+  - MULTIMODAL inputs: tabular + free text + images in one model. Trees cannot
+    do this; you would need a separate encoder anyway, at which point an
+    end-to-end net is simpler.
+  - TRANSFER LEARNING / PRETRAINING across related tables or tasks.
+  - When the model must be differentiable end to end - as part of a larger
+    network, or for gradient-based downstream optimisation.
+  - Sequence structure over time per entity, where an RNN/transformer beats
+    hand-rolled lag features.
+
+4.4 The honest framing
+----------------------
+Specialised tabular architectures (TabNet, FT-Transformer, SAINT, NODE) have
+been published for years, each claiming to beat GBDT. Independent benchmarks
+(Shwartz-Ziv & Armon 2022; Grinsztajn et al. 2022) repeatedly find that a tuned
+GBDT matches or beats them on most datasets, and costs much less to tune.
+
+The professional answer: "Start with GBDT. It is the baseline, and on tabular
+data the baseline usually wins. Reach for deep learning when you have a
+specific reason - scale, embeddings, multimodality or transfer - not because it
+is newer."
+
+
+================================================================================
+5) WHAT IF THE BASE LEARNER IS LINEAR INSTEAD OF A TREE?
+================================================================================
+
+5.1 The short answer
+--------------------
+"The ensemble collapses. A sum of linear models is itself a linear model, so
+boosting linear learners gives you no extra expressiveness - what you actually
+get is a regularized linear model fitted by stagewise coordinate descent."
+
+5.2 The algebra
+---------------
+    F(x) = (a_1 + b_1 x) + (a_2 + b_2 x) + ... + (a_M + b_M x)
+         = (SUM a_m) + (SUM b_m) x
+         = A + B x
+
+A hundred boosting rounds produce exactly one intercept and one slope. Compare
+with trees, where summing step functions genuinely creates a new, far richer
+function class.
+
+5.3 So what IS it good for
+--------------------------
+The thing you get is not useless - it is a DIFFERENT ALGORITHM than you thought:
+
+  - If each round fits the single best feature to the residual and adds a small
+    multiple of it, you are doing stagewise coordinate descent, whose solution
+    path closely approximates the LASSO path (the point Hastie et al. make,
+    also mentioned in foundations.txt section 3). You get L1-like feature
+    selection for free.
+  - XGBoost exposes this as booster='gblinear'. It is occasionally useful on
+    very high-dimensional sparse linear problems (text-like data) where trees
+    struggle.
+  - It EXTRAPOLATES, which trees cannot (failure_modes.txt section 3). That is
+    sometimes exactly why you would want a linear component - typically as the
+    trend part of a hybrid model with trees on the residuals.
+
+5.4 What you lose
+-----------------
+Interactions (a linear model has none unless you build them by hand),
+automatic nonlinearity, native missing-value handling, and invariance to
+monotone feature transforms. Which is to say: everything that made boosted
+TREES the default.
+
+5.5 The general lesson
+----------------------
+Boosting is a META-ALGORITHM, and its value depends entirely on whether summing
+the base learner's outputs produces a richer function class than the base
+learner itself. Step functions: yes, enormously. Linear functions: no, not at
+all. That is the real reason trees and boosting are paired everywhere.
+
+
+================================================================================
+6) EXPLAINING XGBOOST'S EDGE OVER PLAIN GRADIENT BOOSTING IN TWO MINUTES
+================================================================================
+
+6.1 The two-minute version
+--------------------------
+"Same algorithm, better objective and much better engineering. Five things:
+
+ 1. A REGULARIZED OBJECTIVE. Classic GBM controls complexity from outside with
+    max_depth and a learning rate. XGBoost puts gamma-per-leaf and an L2 penalty
+    on leaf weights INSIDE the objective, so complexity is priced into every
+    decision the tree makes.
+
+ 2. SECOND-ORDER OPTIMISATION. It Taylor-expands the loss to second order, so
+    each round uses the gradient AND the hessian. That makes the leaf value a
+    Newton step, w* = -G/(H+lambda), and makes any twice-differentiable loss
+    pluggable - the tree code only ever sees g and h.
+
+ 3. A SPLIT CRITERION DERIVED FROM THAT OBJECTIVE. Instead of Gini or variance
+    reduction, the gain is the improvement in the regularized objective itself,
+    minus gamma. Pruning and stopping fall out of the same formula.
+
+ 4. SPARSITY-AWARE SPLITTING. Missing values are not imputed; every split
+    learns a default direction by trying both sides. It preserves the signal in
+    missingness and skips the zeros, which is a large speedup on sparse data.
+
+ 5. SYSTEMS WORK. Pre-sorted column blocks computed once and reused by every
+    node of every tree, parallel split finding across columns, cache-aware
+    gradient prefetching, and out-of-core blocks. That is where the 10x came
+    from."
+
+6.2 The honest closing line
+---------------------------
+"The accuracy gain over a well-tuned classic GBM is real but modest. The speed
+gain was enormous, and that is what mattered in practice - being 10x faster
+means you try 10x more ideas, and the ideas are usually worth more than the
+algorithm."
+
+6.3 The follow-up
+-----------------
+"And what did LightGBM change after that?" Histogram binning, leaf-wise growth,
+GOSS and EFB - all attacks on the cost of finding a split
+(lightgbm_catboost.txt). "And CatBoost?" Ordered target statistics and ordered
+boosting - fixes for two leakage/bias problems - plus oblivious trees for fast
+inference.
+
+
+================================================================================
+7) WHAT CAN STILL BE PARALLELISED WHEN THE TREES ARE SEQUENTIAL
+================================================================================
+
+7.1 The short answer
+--------------------
+"The ROUNDS cannot be parallelised, because tree m's targets are defined by
+trees 1..m-1. Everything inside a round can be, and in practice that is enough
+to saturate a machine."
+
+7.2 What is strictly sequential
+-------------------------------
+Exactly one thing: the sequence of rounds. Tree 300's pseudo-residuals do not
+exist until tree 299 is finished. That is a genuine data dependency, so the
+wall-clock floor is (number of rounds) x (time for one tree), and no amount of
+hardware removes it.
+
+7.3 What is parallel
+--------------------
+    WITHIN ONE TREE
+      - split finding across FEATURES (XGBoost's column blocks exist for this)
+      - split finding across candidate thresholds / histogram bins
+      - histogram construction per feature, then a reduce
+      - sibling nodes at the same depth are independent of each other
+
+    ACROSS ROWS
+      - computing g_i and h_i - one independent calculation per row, so it
+        parallelises across cores and across machines
+      - distributed training: each worker builds partial histograms on its
+        shard, then an allreduce combines them. Only the histograms cross the
+        network, not the data.
+
+    ACROSS TREES, WHERE THEY ARE NOT DEPENDENT
+      - MULTICLASS: the K trees of a single round are independent of each other
+        (gradient_boosting.txt section 7.3)
+      - INFERENCE: F(x) = SUM_m h_m(x), so at prediction time all M trees are
+        independent and can be evaluated in any order
+
+    AROUND THE FIT
+      - cross-validation folds
+      - hyperparameter search trials (usually the best use of extra machines)
+
+7.4 The contrast to state
+-------------------------
+"Random Forest parallelises across trees and scales nearly linearly with cores.
+Boosting parallelises within trees instead. The practical consequence is not
+that boosting is slow - a histogram-based GBDT trains a shallow tree very
+quickly - it is that you cannot buy your way past the serial chain by adding
+machines, so the learning rate and round count are compute decisions, not just
+accuracy decisions."
+
+
+================================================================================
+8) RAPID-FIRE GOTCHAS
+================================================================================
+
+Short traps that come up as follow-ups. One line each, with where to read more.
+
+  - "Boosting cannot overfit." FALSE. Training loss falls forever; validation
+    traces a U. (failure_modes.txt section 1)
+
+  - Early stopping on the test set. That is leakage - the test set has now
+    chosen a hyperparameter. Use train / validation / test.
+    (regularization_and_tuning.txt section 2.4)
+
+  - Lowering the learning rate without raising n_estimators. That is
+    underfitting, not regularization. They trade off directly.
+    (regularization_and_tuning.txt section 1.3)
+
+  - Reporting "feature importance" without saying WHICH TYPE. weight, cover and
+    gain give different rankings, and weight is biased toward high-cardinality
+    features. (failure_modes.txt section 6)
+
+  - Standardising or scaling features for a GBDT. Unnecessary. Trees are
+    invariant to any monotone transform of a feature, so log(x) and x produce
+    identical splits.
+
+  - One-hot encoding a 2,000-level categorical. Memory explodes and every dummy
+    is a near-useless split. (failure_modes.txt section 7)
+
+  - Target encoding computed before the train/test split. Leakage, and your
+    validation score is contaminated too.
+    (lightgbm_catboost.txt section 5)
+
+  - Expecting a GBDT to forecast above its training range. It physically
+    cannot - the output is a sum of leaf constants.
+    (failure_modes.txt section 3)
+
+  - Using accuracy on a 0.5% positive rate. Predicting "no" everywhere scores
+    99.5%. Use PR-AUC or expected cost. (failure_modes.txt section 4)
+
+  - Leaving the decision threshold at 0.5 on imbalanced data. Tune it on
+    validation; it often matters more than the model.
+    (failure_modes.txt section 4.3)
+
+  - Reading boosted scores as probabilities after setting scale_pos_weight.
+    Weighting shifts the base rate and breaks calibration.
+    (failure_modes.txt section 5)
+
+  - Comparing a tuned GBDT to an untuned Random Forest and concluding boosting
+    is better. Tune both or neither.
+
+  - Setting num_leaves = 1024 with max_depth = 7 in LightGBM. Impossible; the
+    depth cap silently wins. (lightgbm_catboost.txt section 2.4)
+
+  - Deep trees in a boosted model. Depth is interaction order, and depth 12 in
+    a GBDT usually means a different parameter is the real problem.
+    (foundations.txt section 4.4)
+
+  - Assuming the base learner must be a tree. It must only be something whose
+    SUM is richer than itself - which rules out linear learners (section 5).
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+Random Forest and GBDT differ in one thing from which everything else follows:
+averaging independent deep trees removes variance, summing dependent shallow
+trees removes bias - which is also why RF wants deep trees and boosting wants
+shallow ones, and why more trees is always safe in one and eventually harmful in
+the other. AdaBoost is the exponential-loss instance of the same stagewise
+framework gradient boosting generalises, and freeing the loss is what bought
+regression, calibrated probabilities and noise tolerance. On tabular data GBDT
+still beats deep learning on most small-to-medium problems because trees handle
+non-smooth targets, irrelevant columns and unscaled mixed features natively,
+while neural nets win on scale, embeddings, multimodality and transfer. Boosting
+a LINEAR learner collapses to a single linear model, which is the sharpest way
+to see that boosting only pays off when summing the base learner creates a
+richer function class. XGBoost's edge over classic GBM is a regularized
+objective, second-order Newton steps, a split criterion derived from that
+objective, sparsity-aware default directions, and a great deal of systems
+engineering - with the speed mattering more in practice than the accuracy. And
+while the rounds themselves are strictly sequential, split finding, histogram
+building, gradient computation, the K trees of a multiclass round, inference,
+and the whole tuning search all parallelise.

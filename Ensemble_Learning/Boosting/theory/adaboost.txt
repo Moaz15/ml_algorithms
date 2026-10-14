@@ -1,0 +1,295 @@
+BOOSTING - 1.2 ADABOOST
+================================================================================
+The first boosting algorithm that actually worked (Freund & Schapire, 1995).
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+You run a hiring panel. After every interview round you look at the candidates
+the panel judged wrongly, and you put a RED STICKER on their files. The next
+interviewer you bring in is told: "the red-sticker files are what matter."
+
+Two things are happening at once:
+  1. The DATA gets reweighted - hard rows get louder every round.
+  2. The INTERVIEWERS get weighted - someone with a good track record gets a
+     bigger say in the final vote than someone who was barely better than a
+     coin flip.
+
+That is AdaBoost. Reweight the rows, then take a weighted vote.
+
+Note on notation: AdaBoost uses labels y in {-1, +1}, not {0, 1}. This is not
+cosmetic - it makes y * h(x) equal +1 when correct and -1 when wrong, which is
+what every formula below leans on.
+
+================================================================================
+1) THE ALGORITHM
+================================================================================
+
+1.1 What each round does, in words
+----------------------------------
+Every training row carries a weight - how much the next model is punished for
+getting that row wrong. All rows start equally important. Then, each round:
+
+    1. Train a weak model on the data, paying attention to the weights.
+    2. Measure how much weight it got wrong. Call that err.
+    3. Turn err into a vote size, alpha. Low error -> big vote.
+    4. Multiply up the weights of the rows it got wrong, multiply down the
+       weights of the rows it got right.
+    5. Rescale the weights so they add to 1 again.
+
+Repeat M times, then let all the models vote, each with its own alpha.
+
+1.2 The same thing in formulas
+------------------------------
+N training rows, M rounds, weak learner usually a decision stump:
+
+    Start:  w_i = 1/N  for every row
+
+    For m = 1..M:
+      a) Fit h_m on the data using the current weights w.
+      b) Weighted error (the share of weight sitting on wrong rows):
+             err_m  =  SUM_i w_i * 1[ y_i != h_m(x_i) ]   /   SUM_i w_i
+      c) Vote size for this learner:
+             alpha_m  =  0.5 * ln( (1 - err_m) / err_m )
+      d) Reweight every row:
+             w_i  <-  w_i * exp( -alpha_m * y_i * h_m(x_i) )
+             which is just  w_i * exp(-alpha_m)  if the row was right,
+                            w_i * exp(+alpha_m)  if the row was wrong.
+      e) Normalise so the weights sum to 1.
+
+    Final model:
+             H(x)  =  sign( SUM_m  alpha_m * h_m(x) )
+
+Only step (d) looks cryptic, and it is not: because y and h are both -1 or +1,
+the product y*h(x) is +1 on a correct row and -1 on a wrong one. So the minus
+sign in the exponent shrinks correct rows and grows wrong ones. That is all it
+does.
+
+1.3 One round with real numbers
+-------------------------------
+10 rows, so every weight starts at 0.1. The first stump gets 3 rows wrong.
+
+    Step 2 - error:
+        err_1 = 3 * 0.1 = 0.3
+
+    Step 3 - vote size:
+        alpha_1 = 0.5 * ln(0.7 / 0.3) = 0.5 * 0.8473 = 0.4236
+
+    Step 4 - reweight:
+        wrong rows grow:  0.1 * exp(+0.4236) = 0.1 * 1.5275 = 0.15275  each
+        right rows shrink: 0.1 * exp(-0.4236) = 0.1 * 0.6547 = 0.06547  each
+        they now sum to  3(0.15275) + 7(0.06547) = 0.91652
+
+    Step 5 - normalise (divide by 0.91652):
+        wrong rows:  0.1667  each   ->  3 rows carry 0.50 of the weight
+        right rows:  0.0714  each   ->  7 rows carry 0.50 of the weight
+
+1.4 The one fact worth remembering
+----------------------------------
+Those two totals came out at exactly 0.50 and 0.50. That is not luck in this
+example - it happens every round, for any err. The alpha formula is chosen to
+make it happen.
+
+What does it mean? On the NEW weights, the stump you just trained gets half the
+weight right and half wrong - it scores exactly 50%, a coin flip. It has nothing
+left to offer.
+
+So each round hands the next learner a dataset where the previous learner is
+now useless. Repeating the old reasoning earns nothing; the only way to improve
+is to find something the previous model missed. That is the engine of AdaBoost.
+
+
+================================================================================
+2) THE LEARNER WEIGHT alpha
+================================================================================
+
+2.1 How it behaves
+------------------
+    alpha  =  0.5 * ln( (1 - err) / err )
+
+    err = 0.01  ->  alpha = +2.30    nearly perfect learner, huge vote
+    err = 0.10  ->  alpha = +1.10
+    err = 0.30  ->  alpha = +0.42
+    err = 0.40  ->  alpha = +0.20    weak, small vote
+    err = 0.50  ->  alpha =  0.00    coin flip, NO vote at all
+    err = 0.70  ->  alpha = -0.42    worse than chance -> vote is INVERTED
+
+Three things to read off that table:
+
+  - alpha > 0 exactly when err < 0.5. The "beat a coin flip" condition from
+    foundations.txt is not a loose guideline, it is the sign condition on alpha.
+  - err = 0.5 gives alpha = 0: a useless learner is added with zero weight and
+    changes nothing. The algorithm self-protects.
+  - err > 0.5 gives a NEGATIVE alpha, which flips the learner's prediction. A
+    model that is reliably wrong is reliably useful, flipped. (In practice
+    implementations usually stop instead.)
+
+2.2 The edge cases
+------------------
+  - err -> 0 makes alpha -> +infinity (log of zero). A base learner that
+    classifies the weighted data perfectly ends boosting: it would get infinite
+    weight and the row weights would collapse. Implementations guard with a
+    small epsilon or simply stop. If this happens on round 1, your base learner
+    is too strong - see foundations.txt section 4.
+  - err exactly 0.5 after some rounds means the base learner class has run out
+    of usable structure. Also a stopping condition.
+
+
+================================================================================
+3) ADABOOST IS STAGEWISE FITTING UNDER EXPONENTIAL LOSS
+================================================================================
+
+3.1 The claim
+-------------
+AdaBoost is not a one-off trick. It is the ordinary recipe from foundations.txt
+section 3 - add one small model at a time to reduce a loss - with one specific
+loss:
+
+    EXPONENTIAL LOSS:   L(y, F) = exp( -y * F(x) )
+
+Choose that loss, do the algebra, and all of section 1 falls out of it: the row
+weights and the alpha formula are forced, not invented. Freund and Schapire did
+not know this in 1995; Friedman, Hastie and Tibshirani showed it in 2000.
+
+The derivation is two lines of calculus (ESL 10.4) and is not worth memorising.
+The two consequences are.
+
+3.2 Consequence 1: a row's weight IS its loss
+---------------------------------------------
+    w_i  =  exp( -y_i * F(x_i) )
+
+F(x) is the ensemble's running score before the sign is taken, so y*F says
+"how right, and how confidently":
+
+    y*F = +2  ->  exp(-2) =  0.14   right and sure   -> weight near zero
+    y*F =  0  ->  exp(0)  =  1.00   on the fence
+    y*F = -1  ->  exp(1)  =  2.72   wrong            -> weight grows
+    y*F = -3  ->  exp(3)  = 20.1    badly wrong      -> weight explodes
+
+"Put a red sticker on the hard rows" and "these rows have the biggest loss" are
+the same sentence. That is the whole mechanism.
+
+3.3 Consequence 2: the loss is swappable
+----------------------------------------
+Once AdaBoost is "stagewise fitting + a choice of loss", the obvious question
+is what happens with a different choice - squared loss, log loss, Huber. That
+question is gradient boosting (gradient_boosting.txt), and AdaBoost becomes
+just the exponential-loss row of the table.
+
+Interview answer: "AdaBoost is forward stagewise additive modelling under
+exponential loss; gradient boosting generalises it to any differentiable loss."
+
+
+================================================================================
+4) THE PRICE OF THAT LOSS: ONE BAD LABEL CAN WRECK IT
+================================================================================
+
+4.1 The example
+---------------
+Someone mislabels one email in your training set - an ordinary work email
+tagged as spam. No sensible rule will ever get it "right", so every round gets
+it wrong, and every round multiplies its weight by exp(+alpha) > 1.
+
+The weight is exp(-y*F), and F keeps drifting the wrong way:
+
+    y*F = -1    ->  weight      2.7
+    y*F = -3    ->  weight     20
+    y*F = -5    ->  weight    148
+    y*F = -10   ->  weight 22,026
+
+That one row now outweighs hundreds of clean ones, and every later stump is
+fitted almost entirely to it. The ensemble bends itself around a typo.
+
+4.2 The rule behind it
+----------------------
+How robust a loss is = how fast it grows on a badly wrong point.
+
+    exponential  exp(-yF)        grows exponentially  -> fragile
+    log loss     ln(1+exp(-yF))  grows linearly       -> safe
+    hinge        max(0, 1-yF)    grows linearly       -> safe
+
+This is the whole reason "AdaBoost is sensitive to noisy labels and outliers"
+is a standard interview answer, and why practical boosting uses log loss.
+
+4.3 Fixes
+---------
+  - Use gradient boosting with log loss (binary:logistic) instead.
+  - Clean the labels. Dumping the highest-weight rows after training usually
+    surfaces data errors, so this failure mode doubles as a diagnostic.
+  - Fewer rounds, smaller learning rate.
+
+
+================================================================================
+5) TEST ERROR KEEPS FALLING AFTER TRAINING ERROR HITS ZERO
+================================================================================
+
+5.1 The observation
+-------------------
+    round      train error     test error
+       50         0.00            0.11     <- training set already perfect
+      200         0.00            0.085
+     1000         0.00            0.079    <- still improving
+
+Classically this should not happen: zero training error means you are done, and
+extra capacity should only hurt.
+
+5.2 The explanation: margins
+----------------------------
+Training error only sees the SIGN of a prediction - right or wrong. It cannot
+see CONFIDENCE. The margin can:
+
+    margin  =  y * (weighted vote), rescaled to lie in [-1, +1]
+
+    margin = +0.05   correct, but 52% vs 48% - nearly a tie
+    margin = +0.80   correct by a landslide
+
+Once training error is zero every margin is positive, but many are barely
+positive - and those barely-correct rows still carry the largest weights, so
+boosting keeps pushing on them. The error count cannot improve; the margins
+still can. Schapire et al. (1998) proved a generalisation bound that depends on
+the margin distribution rather than on the number of rounds M.
+
+5.3 The caveat (say it if pushed)
+---------------------------------
+Margin theory is a partial explanation. Breiman's "arc-gv" reaches provably
+larger margins than AdaBoost and generalises worse. And all of this assumes
+CLEAN labels - with noisy labels AdaBoost overfits visibly (section 4). Never
+say "boosting cannot overfit".
+
+
+================================================================================
+6) MULTICLASS: SAMME
+================================================================================
+
+With K classes the binary condition err < 0.5 becomes impossible. Guessing at
+random among K = 10 classes already gives err = 0.9, so no stump gets under
+0.5, alpha goes negative, and the algorithm stalls on round one.
+
+SAMME fixes it with one extra term:
+
+    alpha_m  =  ln( (1 - err_m) / err_m )  +  ln(K - 1)
+
+Now alpha > 0 only requires  err_m < 1 - 1/K : the learner has to beat RANDOM
+GUESSING AMONG K CLASSES, which is the right generalisation of "beat a coin
+flip". (K = 2 gives ln(1) = 0, so it reduces to binary AdaBoost.)
+
+SAMME.R is the variant that uses predicted probabilities instead of hard labels
+- fewer rounds to converge, but it needs predict_proba. scikit-learn has
+deprecated it and defaults to SAMME. For serious multiclass work people reach
+for gradient boosting anyway.
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+AdaBoost reweights the training rows after every round so the rows the last
+learner got wrong carry exactly half the total weight, forcing the next learner
+to find a new angle; each learner votes with weight alpha = 0.5*ln((1-err)/err),
+positive only when it beats a coin flip. None of this is ad hoc - it is forward
+stagewise additive modelling under exponential loss, where a row's weight is
+literally its loss, exp(-y*F). That same exponential is the weakness: it
+explodes on badly wrong rows, so one mislabeled example can dominate training,
+which is why log loss and gradient boosting replaced it. Its famous property -
+test error still falling long after training error hits zero - is boosting
+continuing to push up MARGINS that the error count cannot see, though that
+explanation is partial and assumes clean labels. For K classes, SAMME adds
+ln(K-1) to alpha so the bar becomes "beat 1/K" instead of "beat 1/2".

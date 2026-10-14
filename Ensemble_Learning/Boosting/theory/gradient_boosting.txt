@@ -1,0 +1,354 @@
+BOOSTING - 1.3 GRADIENT BOOSTING
+================================================================================
+The generalisation that made boosting work for any problem (Friedman, 2001).
+Read foundations.txt and adaboost.txt first.
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+AdaBoost solved one problem - binary classification with exponential loss - by
+reweighting rows. But most real problems are not that. You want to predict a
+price (squared error), or a delivery time where a few huge outliers must not
+dominate (absolute error), or a click probability (log loss), or a count of
+daily orders (Poisson). Reweighting rows does not obviously generalise to any
+of those.
+
+Friedman's move: stop thinking about weights, and think about GRADIENT DESCENT.
+
+You already know gradient descent for parameters: compute the derivative of the
+loss with respect to each weight, step in the opposite direction, repeat. The
+trick is to do the same thing where the thing being optimised is not a vector of
+weights but THE PREDICTION FUNCTION ITSELF.
+
+That one reframe gives you boosting for any loss function you can
+differentiate - which is why every modern library (XGBoost, LightGBM, CatBoost)
+is a gradient boosting library.
+
+
+================================================================================
+1) THE REFRAME: GRADIENT DESCENT IN FUNCTION SPACE
+================================================================================
+
+1.1 The familiar version
+------------------------
+Training a linear model. You hold a vector of numbers and nudge it:
+
+    theta  <-  theta  -  lr * dL/dtheta
+
+You can do this because theta is a list of numbers you own and can edit.
+
+1.2 The version boosting needs
+------------------------------
+Now suppose the thing you want to improve is a FUNCTION F, and you have no
+parameters to nudge - F is a pile of decision trees. What is the analogue?
+
+Pretend, just for a moment, that F is a vector with one entry per training row:
+
+    F  =  [ F(x_1), F(x_2), ..., F(x_N) ]      N numbers
+
+Now the loss IS a function of N numbers, and you can differentiate it in the
+ordinary way. For each row:
+
+    g_i  =  dL( y_i , F(x_i) )  /  dF(x_i)
+
+Steepest descent says: move each prediction in the direction -g_i.
+
+    F(x_i)  <-  F(x_i)  -  lr * g_i
+
+1.3 The problem, and the fix
+----------------------------
+That update only tells you what to do at the N training points. It says nothing
+about a new house you have never seen. A list of N numbers is not a model.
+
+The fix is the whole algorithm in one sentence:
+
+    FIT A SMALL TREE TO THOSE N NUMBERS, AND ADD THE TREE.
+
+The tree is a generalisable stand-in for the gradient step. It approximates "the
+direction I want to move" as a function of x, so it works on new data too.
+
+    F_m(x)  =  F_(m-1)(x)  +  nu * h_m(x)        where h_m approximates -g
+
+Everything else in this file is detail on top of that sentence.
+
+
+================================================================================
+2) PSEUDO-RESIDUALS
+================================================================================
+
+2.1 The definition
+------------------
+The target the next tree is fitted to is called the PSEUDO-RESIDUAL:
+
+    r_im  =  -[ dL( y_i , F(x_i) ) / dF(x_i) ]   evaluated at  F = F_(m-1)
+
+Read it as "which way, and how hard, do I wish this row's prediction would
+move". It is a number per training row, recomputed from scratch every round.
+
+2.2 Why not just use the error?
+-------------------------------
+Because "the error" is only the right target for ONE loss function. The
+pseudo-residual is what the error becomes once you ask the loss what it actually
+wants. Concrete comparison on a single row, true value y = 100, current
+prediction F = 40, so the raw error is 60:
+
+    squared loss      the tree is asked to fit  +60     (full size of the miss)
+    absolute loss     the tree is asked to fit   +1     (direction only!)
+    Huber (delta=10)  the tree is asked to fit  +10     (clipped)
+
+Same row, same miss, three completely different instructions. With absolute
+loss, a row that is off by 60 and a row that is off by 6 send the SAME signal -
+which is exactly why absolute loss is robust to outliers: a crazy row cannot
+shout louder than a normal one.
+
+2.3 The table to memorise
+-------------------------
+    LOSS                     L(y, F)                 PSEUDO-RESIDUAL  -dL/dF
+    ------------------------------------------------------------------------
+    Squared error            0.5 * (y - F)^2         y - F
+    Absolute error (MAE)     |y - F|                 sign(y - F)
+    Huber (delta)            mixed                   y - F        if |y-F| <= d
+                                                     d * sign(y-F) otherwise
+    Log loss (binary)        see section 7           y - p,  p = sigmoid(F)
+    Poisson (log link)       see section 6           y - exp(F)
+
+Note how clean the log-loss one is: predicted probability minus actual label.
+If the model says 0.9 and the truth is 1, the pseudo-residual is +0.1. If it
+says 0.9 and the truth is 0, it is -0.9. Bounded in [-1, 1] no matter how wrong
+you are, which is the robustness property AdaBoost's exponential loss lacks.
+
+
+================================================================================
+3) THE FULL ALGORITHM
+================================================================================
+
+3.1 The loop
+------------
+    STEP 0 - initialise with the best single constant:
+        F_0(x)  =  argmin_c  SUM_i L(y_i, c)
+
+        squared loss  -> the MEAN of y
+        absolute loss -> the MEDIAN of y
+        log loss      -> the log-odds of the base rate, ln(p/(1-p))
+
+    For m = 1..M:
+
+    STEP 1 - compute pseudo-residuals for every row:
+        r_im = -[ dL(y_i, F(x_i)) / dF(x_i) ]  at F_(m-1)
+
+    STEP 2 - fit a regression tree to (x_i, r_im).
+        Note: ALWAYS a regression tree, even for classification. The tree is
+        fitted to gradients, which are real numbers, never to the class labels.
+        This gives you the leaf REGIONS R_1m ... R_Jm.
+
+    STEP 3 - solve each leaf's output value against the REAL loss:
+        gamma_jm  =  argmin_gamma  SUM_{x_i in R_jm}  L( y_i , F_(m-1)(x_i) + gamma )
+
+    STEP 4 - update, with shrinkage:
+        F_m(x)  =  F_(m-1)(x)  +  nu * SUM_j gamma_jm * 1[x in R_jm]
+
+3.2 The split between step 2 and step 3
+---------------------------------------
+This is the part people skip, and it is the most interesting step. Step 2 uses
+the gradients only to decide WHERE TO SPLIT. Step 3 throws away the tree's own
+leaf values and recomputes them against the true loss. Section 5 explains why.
+
+
+================================================================================
+4) SQUARED LOSS: THE SPECIAL CASE EVERYONE LEARNS FIRST
+================================================================================
+
+4.1 Why the textbook version looks so simple
+--------------------------------------------
+Take L = 0.5 * (y - F)^2. Then:
+
+    dL/dF  =  -(y - F)        so        -dL/dF  =  y - F
+
+The pseudo-residual IS the ordinary residual. So the whole algorithm collapses
+to the version everyone meets first:
+
+    "fit a tree to the residuals, add a bit of it, recompute the residuals,
+     repeat"
+
+4.2 Tiny worked example
+-----------------------
+True price 500k, nu = 0.1.
+
+    F_0 = 400      (the mean)
+    residual = 500 - 400 = 100        <- also the pseudo-residual
+    tree predicts +100, we add 0.1 * 100 = +10
+    F_1 = 410
+    residual = 90
+    ... and so on (this is the same trace as foundations.txt section 3.2)
+
+4.3 The point to internalise
+----------------------------
+"Boosting fits the residuals" is not the definition of gradient boosting. It is
+what gradient boosting HAPPENS to look like when you choose squared loss. Swap
+the loss and the target changes - sometimes drastically, as section 2.2 showed.
+
+Also worth knowing: under squared loss, step 3 is a no-op. The leaf value that
+minimises squared error is the mean of the residuals in that leaf, which is
+exactly what the regression tree already computed. This is why squared loss
+hides the step-2/step-3 distinction entirely.
+
+
+================================================================================
+5) WHY LEAF VALUES ARE RE-SOLVED AGAINST THE REAL LOSS
+================================================================================
+
+5.1 The problem, with absolute error
+------------------------------------
+Use MAE. The pseudo-residuals are all +1 or -1 (sign only). A tree is fitted to
+those, and ends up with a leaf containing 10 rows: 7 with r = +1, 3 with r = -1.
+
+The tree's own leaf value is the MEAN of its targets:
+
+    (7*(+1) + 3*(-1)) / 10  =  +0.4
+
+Now ask what that means. You are predicting HOUSE PRICES in thousands. The tree
+is telling you to add 0.4 to the prediction. That is nonsense - it is an average
+of direction flags, it has no connection to the scale of the thing you are
+predicting. If the actual misses in that leaf are +80k, +120k, -30k ..., adding
+0.4 is useless.
+
+5.2 The fix
+-----------
+Keep the tree's SPLITS (they identified a group of rows that behave alike), but
+re-solve the output value against the real loss:
+
+    gamma_j  =  argmin_gamma  SUM_{rows in leaf}  |  y_i - (F_(m-1)(x_i) + gamma) |
+
+For absolute loss the answer is the MEDIAN of the true residuals in that leaf -
+a real number on the price scale, and robust. For Huber it is a trimmed-mean
+style quantity. For log loss there is no closed form, so one Newton step is used:
+
+    gamma_j  =  SUM (y_i - p_i)  /  SUM p_i*(1 - p_i)
+
+(That expression is worth remembering - it reappears in xgboost.txt as
+w* = -G/(H+lambda), which is the same thing with an L2 penalty added.)
+
+5.3 The one-line version
+------------------------
+    The gradients decide WHERE to split. The real loss decides WHAT to output.
+
+Under squared loss the two answers coincide, which is why the distinction is
+invisible in the textbook example and surprising everywhere else.
+
+
+================================================================================
+6) SWAPPING THE LOSS: WHAT EACH ONE BUYS
+================================================================================
+
+    SQUARED ERROR  (reg:squarederror, 'l2')
+      Targets the MEAN. Smooth, fast, the default.
+      Buys: well-behaved gradients, exact leaf solution.
+      Costs: a row that is off by 1000 produces a gradient of 1000 and bullies
+             the whole tree. One bad outlier can visibly bend the model.
+      Use when: y is roughly symmetric and clean.
+
+    ABSOLUTE ERROR  (reg:absoluteerror, 'l1', MAE)
+      Targets the MEDIAN. Gradient is +-1 regardless of how wrong you are.
+      Buys: strong robustness to outliers in y.
+      Costs: slower convergence (direction only, no magnitude), and the gradient
+             is undefined at zero.
+      Use when: the target has a heavy tail - delivery times, claim amounts.
+
+    HUBER  (huber, or 'fair'/'quantile' relatives)
+      Squared near zero, linear past a threshold delta.
+      Buys: the best of both - normal rows send full-size signal, extreme rows
+            are clipped.
+      Costs: one more hyperparameter (delta), usually set to a quantile of the
+             residuals and updated each round.
+
+    LOG LOSS / BINARY CROSS-ENTROPY  (binary:logistic)
+      The default for binary classification. Pseudo-residual = y - p.
+      Buys: bounded gradients (so far more noise-tolerant than AdaBoost's
+            exponential loss), and it is a PROPER SCORING RULE, so the output
+            can be read as a probability.
+      Use when: you need probabilities, not just a class.
+
+    POISSON  (count:poisson, with a log link)
+      Pseudo-residual = y - exp(F). Prediction is exp(F), so it is always
+      positive and the model works multiplicatively.
+      Buys: the right shape for COUNTS - daily orders, claim frequency, page
+            views. Respects the mean = variance structure of count data.
+      Costs: wrong if your counts are over-dispersed (then use Tweedie or
+             negative binomial).
+
+    QUANTILE  (quantile, alpha=tau)
+      Targets the tau-th quantile instead of the mean.
+      Buys: prediction intervals. Train three models at tau = 0.1, 0.5, 0.9 and
+            you have a band, not a point.
+
+The practical takeaway: CHOOSING THE LOSS IS A MODELLING DECISION, not a
+default. It encodes what you consider a bad mistake. Most people tune
+hyperparameters for hours and never question reg:squarederror, which is usually
+the bigger lever.
+
+
+================================================================================
+7) FROM SCORES TO PROBABILITIES
+================================================================================
+
+7.1 The problem
+---------------
+Trees output arbitrary real numbers, and boosting ADDS them up. If each tree
+output a probability directly, the sum would immediately leave [0, 1]:
+0.6 + 0.3 + 0.4 = 1.3 is not a probability.
+
+7.2 The fix: work in log-odds space
+-----------------------------------
+Let the ensemble F(x) output a LOG-ODDS SCORE, which is allowed to be any real
+number, and convert at the very end:
+
+    p(x)  =  1 / ( 1 + exp(-F(x)) )            the sigmoid / logistic function
+    F(x)  =  ln( p / (1 - p) )                 the logit, going the other way
+
+Now adding trees is always safe - any real sum maps back into (0, 1).
+
+    F = -2  ->  p = 0.12
+    F =  0  ->  p = 0.50
+    F = +2  ->  p = 0.88
+    F = +5  ->  p = 0.993
+
+And the initialisation F_0 is just the log-odds of the training base rate: with
+5% positives, F_0 = ln(0.05/0.95) = -2.94.
+
+7.3 Multiclass costs you K trees per round
+------------------------------------------
+With K classes you need K scores per row, then a softmax:
+
+    p_k(x)  =  exp(F_k(x))  /  SUM_j exp(F_j(x))
+
+Each F_k is its own additive model, so every round fits K TREES, one per class,
+each to its own pseudo-residual (y_ik - p_ik) where y_ik is the one-hot label.
+
+    10 classes, 500 rounds  ->  5,000 trees
+
+Consequences worth stating in an interview:
+  - Training cost and model size scale linearly in K. A 1,000-class problem is
+    usually not a GBDT problem.
+  - Those K trees within a round ARE independent of each other, so that part
+    parallelises (see foundations.txt section 6).
+  - For very large K, people switch to one-vs-rest with a shared feature
+    pipeline, or to a neural model with a softmax head.
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+Gradient boosting reframes boosting as gradient descent where the thing being
+optimised is the prediction function itself: treat the N training predictions as
+a vector, take the derivative of the loss with respect to them, and fit a small
+tree to the negative gradient so the step generalises to new data. Those
+negative gradients are the pseudo-residuals, and they are only equal to the
+plain residual in the special case of squared loss - with absolute loss they
+collapse to a direction flag, with log loss they become (label minus predicted
+probability). The loop is: start from the best constant, compute
+pseudo-residuals, fit a regression tree to them to find the SPLITS, then re-solve
+each leaf's VALUE against the real loss, then add a shrunken version. Changing
+the loss is the main modelling lever - squared targets the mean, absolute the
+median, Huber compromises, Poisson handles counts, quantile gives intervals -
+and for classification the ensemble works in unconstrained log-odds space and is
+squashed through a sigmoid at the end, which costs K trees per round when there
+are K classes.

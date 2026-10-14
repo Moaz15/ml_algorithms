@@ -1,0 +1,522 @@
+BOOSTING - 1.7 FAILURE MODES AND TRAPS
+================================================================================
+Everything above this file explains why boosting works. This one explains how it
+breaks. In interviews and in production, this is the more valuable half.
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+Boosting's defining behaviour is that it CHASES WHATEVER IS STILL WRONG. That is
+the source of all its power, and every failure mode below is the same sentence
+with a different ending:
+
+    ... and what is still wrong is a typo in the labels     -> section 2
+    ... and what is still wrong is just random noise        -> section 1
+    ... and the thing you want is outside the training range-> section 3
+    ... and the rare class is only 0.5% of the loss         -> section 4
+    ... and you asked for a rank, so it gave you a rank     -> section 5
+
+None of these are exotic. All five show up in ordinary projects.
+
+
+================================================================================
+1) BOOSTING DOES OVERFIT
+================================================================================
+
+1.1 Where the myth comes from
+-----------------------------
+Three real observations, each true, that got combined into a false conclusion.
+
+  (a) AdaBoost's test error often keeps falling after training error hits zero
+      (adaboost.txt section 5). Real, and genuinely surprising.
+  (b) Margin theory gave a generalisation bound that does not depend on the
+      number of rounds M. Real, and often misquoted as "M cannot hurt".
+  (c) With a small learning rate, the bottom of the validation curve is very
+      FLAT. People run 500 rounds, see no degradation, and conclude there is
+      none.
+
+Put together, these produced "boosting does not overfit", which is false.
+
+1.2 What actually happens
+-------------------------
+From foundations.txt section 5 - the validation curve is a U:
+
+    rounds    train RMSE    validation RMSE
+        50        62            66
+       200        41            48
+       600        28            41
+     1,200        19            39     <- best
+     2,000        12            40
+     5,000         4            46     <- overfitting, clearly
+
+Training loss decreases MONOTONICALLY and FOREVER by construction. It is not
+evidence of anything. A model at train 4 / validation 46 has memorised rows.
+
+1.3 When the U is shallow vs steep
+----------------------------------
+    shallow (looks like it never overfits):
+        small learning rate, shallow trees, lots of clean data, subsampling on
+
+    steep (overfits visibly within a few hundred rounds):
+        noisy labels, small dataset, deep trees, nu = 0.3, no subsampling
+
+So the myth survives because most people's first boosting model is in the first
+regime. Change any of those conditions and the U reappears.
+
+1.4 What to do
+--------------
+Early stopping on a real validation set, always (regularization_and_tuning.txt
+section 2). Plot the validation curve rather than trusting a default
+n_estimators. If you never see the curve turn up, you have not run long enough
+to know where the minimum is.
+
+1.5 The interview answer
+------------------------
+"Boosting absolutely can overfit - training loss falls every round by
+construction, and validation error traces a U. The 'cannot overfit' claim comes
+from AdaBoost's margin behaviour on clean data and from how flat the curve is
+with a small learning rate. I always early-stop on validation."
+
+
+================================================================================
+2) LABEL NOISE AND OUTLIERS
+================================================================================
+
+2.1 Why boosting is specifically vulnerable
+-------------------------------------------
+Bagging AVERAGES models, so a tree that chased a bad row is diluted by 499
+others. Boosting SUMS models, and more than that, it actively ROUTES ATTENTION
+toward whatever it cannot fit. A mislabeled row is, by definition, something it
+cannot fit. So it gets more and more attention every round.
+
+That is a feedback loop. Noise is not merely tolerated badly - it is sought out.
+
+2.2 The loss function decides how bad it gets
+---------------------------------------------
+How hard the model chases a row = how fast the loss grows as the row gets more
+wrong. Compare, for a row the model has badly missed:
+
+    LOSS              behaviour far from correct      verdict
+    ------------------------------------------------------------------
+    Exponential       grows EXPONENTIALLY             worst possible
+      exp(-yF)        y*F = -10 gives weight 22,026
+    Squared error     grows QUADRATICALLY             bad for y-outliers
+      (y-F)^2         off by 1000 -> gradient 1000
+    Log loss          grows LINEARLY                  acceptable
+      ln(1+exp(-yF))  gradient bounded in [-1, 1]
+    Huber             LINEAR past delta               good
+    Absolute error    gradient is +-1, always         best for y-outliers
+    Quantile          gradient is a constant          robust
+
+THE PRINCIPLE: ROBUSTNESS = BOUNDED GRADIENT. If one row can produce an
+arbitrarily large gradient, one row can dominate a tree.
+
+2.3 The concrete comparison
+---------------------------
+One row's true label is 50, but a data-entry bug recorded 50,000. The model
+predicts 50.
+
+    squared loss   -> pseudo-residual = 49,950. This single row outweighs
+                      thousands of normal rows in the next tree's split search.
+    absolute loss  -> pseudo-residual = +1. Exactly the same as a row that is
+                      off by 2. It cannot shout.
+
+2.4 Practical defences
+----------------------
+  - Choose a robust loss when the target has a heavy tail: Huber or MAE for
+    regression, log loss (never exponential) for classification.
+  - Cap the target or winsorise it, if that is defensible for the problem.
+  - Lower the learning rate and stop earlier - the chase takes rounds to
+    develop, so stopping early limits the damage.
+  - DIAGNOSTIC: after training, sort rows by their final loss contribution (or
+    by AdaBoost weight) and read the top 50. These are usually genuine data
+    errors, and finding them is worth more than any amount of tuning.
+
+
+================================================================================
+3) NO EXTRAPOLATION
+================================================================================
+
+3.1 The example
+---------------
+Train a GBDT on house prices from 500 to 3,000 sqft. Ask it about a 10,000 sqft
+mansion.
+
+    prediction for 3,000 sqft   ->  1,180,000
+    prediction for 5,000 sqft   ->  1,180,000
+    prediction for 10,000 sqft  ->  1,180,000
+    prediction for 50,000 sqft  ->  1,180,000
+
+It is not confused. It is doing exactly what it was built to do.
+
+3.2 Why, structurally
+---------------------
+The output is a SUM OF LEAF CONSTANTS:
+
+    F(x) = F_0 + nu*(leaf value from tree 1) + nu*(leaf value from tree 2) + ...
+
+Every leaf value was computed from training rows. Any input lands in some leaf,
+and the rightmost leaf of a split on "size > 2,800" is the same leaf for 3,000
+and 50,000 sqft. There is no slope anywhere in the model - it is a step
+function, and outside the training range it is FLAT.
+
+Hard ceiling: the prediction can never exceed the largest sum of leaf values the
+trees can produce, which is bounded by the training targets.
+
+3.3 The trap that costs people real money
+-----------------------------------------
+TIME SERIES WITH A TREND. You train on two years of growing revenue, with a
+time index or date features in the model, and forecast next quarter.
+
+    training revenue range: 100 -> 400 (growing)
+    true next quarter:      440
+    GBDT prediction:        ~400, forever
+
+The model CANNOT predict a value above what it has seen. Your forecast flatlines
+at the historical maximum exactly when the business grows. This is the single
+most common way GBDT is misused in forecasting.
+
+3.4 Fixes
+---------
+  - DETREND FIRST. Model the difference or the ratio (y_t - y_{t-1}, or
+    y_t / y_{t-1}), not the level. Differences stay in range even when levels
+    do not.
+  - HYBRID. Fit a linear model (or Prophet/ETS) for the trend, and boost on its
+    RESIDUALS. The linear part extrapolates, the trees handle the rest.
+  - LINEAR LEAVES. LightGBM's linear_tree=True fits a linear model in each leaf
+    instead of a constant, which gives you a slope at the edges. Also
+    gblinear in XGBoost, though that drops interactions entirely.
+  - KNOW YOUR RANGE. Monitor the input distribution in production and flag rows
+    outside the training envelope. The model will not warn you.
+
+3.5 The flip side
+-----------------
+This is also a SAFETY property. A linear model asked about a 50,000 sqft house
+will confidently output a nonsense number like 18 million. GBDT returns the most
+expensive thing it has ever seen. Sometimes "refuse to speculate" is correct
+behaviour - you just have to know which one you are getting.
+
+
+================================================================================
+4) CLASS IMBALANCE
+================================================================================
+
+4.1 The example
+---------------
+Fraud detection, 0.5% positives. Train a GBDT with default settings. Accuracy:
+99.5%. Fraud caught: approximately none.
+
+Nothing is broken. The loss is dominated by the 99.5% majority, and predicting
+"not fraud" for everything is a genuinely good loss value. The optimiser did
+what you told it to.
+
+4.2 scale_pos_weight
+--------------------
+The standard knob. It multiplies the positive class's gradients AND hessians:
+
+    scale_pos_weight  =  (number of negatives) / (number of positives)
+
+    199,000 negatives / 1,000 positives  ->  scale_pos_weight = 199
+
+Now one fraud case counts as much as 199 normal ones in the loss, so the
+optimiser cares. LightGBM has the same parameter plus is_unbalance=True which
+sets it automatically; CatBoost uses class_weights or auto_class_weights.
+
+IMPORTANT SIDE EFFECT: this deliberately breaks your probability calibration.
+The model is now estimating the probability under a REBALANCED world, not your
+real base rate. Outputs will be far too high. If you need true probabilities,
+either skip the weighting or recalibrate afterwards (section 5).
+
+4.3 Threshold tuning, which matters more than people think
+----------------------------------------------------------
+The default decision rule "predict positive if p > 0.5" is almost never right
+under imbalance. It is a convention, not a result.
+
+    pick the threshold ON THE VALIDATION SET, for the metric you actually care
+    about:
+        maximise F1                          -> a general-purpose compromise
+        maximise recall at precision >= 0.9  -> when false positives are costly
+        minimise expected cost               -> when you can price the two
+                                                error types (usually the right
+                                                framing in business)
+
+A model with poor "accuracy" at 0.5 can be excellent at 0.02. You often do not
+need a better model, you need a better threshold. Do this BEFORE reaching for
+exotic techniques.
+
+4.4 Why resampling fights the loss function
+-------------------------------------------
+    RANDOM OVERSAMPLING duplicates minority rows. A duplicated row contributes
+    its gradient twice. That is arithmetically the SAME as giving it weight 2 -
+    you have reimplemented scale_pos_weight, but worse: you have inflated the
+    dataset size, slowed training, and made your min_child_weight and
+    min_data_in_leaf thresholds meaningless, because a leaf of "100 rows" may
+    be 5 distinct rows repeated 20 times. Boosting then memorises those 5 rows
+    very efficiently.
+
+    RANDOM UNDERSAMPLING throws away real majority data. You lose information
+    the model needed to define the boundary, and it shifts the base rate just
+    like weighting does.
+
+    SMOTE invents synthetic minority points by interpolating between real ones.
+    For a tree, those synthetic points sit in straight lines through feature
+    space, and the tree happily carves out axis-aligned boxes around them. You
+    have given the model fake structure to fit. SMOTE was designed in a
+    k-NN/linear context; it is a poor fit for trees, and it interacts badly
+    with boosting's tendency to chase the hardest points - which are now
+    partly fictional.
+
+THE GENERAL POINT: boosting already has a principled mechanism for saying "this
+row matters more" - the loss and its gradients. Resampling tries to say the
+same thing by distorting the dataset instead, and the two mechanisms fight.
+Prefer weights, then thresholds, then a custom loss (e.g. focal loss), and
+treat resampling as a last resort.
+
+4.5 Metrics
+-----------
+Accuracy is useless under imbalance. ROC-AUC is better but over-optimistic when
+positives are very rare (the false-positive rate barely moves). Use PR-AUC /
+average precision, recall at a fixed precision, or an explicit cost metric.
+
+
+================================================================================
+5) CALIBRATION
+================================================================================
+
+5.1 What the question is
+------------------------
+A calibrated model is one where, among all rows it scores 0.30, about 30% are
+actually positive. That is a strictly stronger requirement than ranking well.
+You need it whenever the number ITSELF is used:
+
+    expected revenue = p(click) * value          needs a real probability
+    "is this loan risky enough to decline"       needs a real probability
+    "show me the 100 riskiest loans"             only needs a ranking
+
+5.2 Where boosting stands
+-------------------------
+Better than most. Log loss is a PROPER SCORING RULE - it is minimised by the
+true probability - so a GBDT trained on binary:logistic is already aiming at
+calibrated output, unlike an SVM (margins, no probabilistic meaning) or naive
+Bayes (famously overconfident).
+
+But it gets distorted by all of the following:
+
+  - TOO MANY ROUNDS. Boosting keeps pushing scores away from the boundary
+    (that is the margin effect from adaboost.txt section 5). Probabilities get
+    squeezed toward 0 and 1, so the model becomes OVERCONFIDENT.
+  - TOO FEW ROUNDS. Scores still bunched near the base rate - underconfident.
+  - CLASS WEIGHTING OR RESAMPLING. Changes the effective base rate, so every
+    probability is shifted. Guaranteed miscalibration (section 4.2).
+  - EARLY STOPPING ON AUC. AUC is rank-only; it is completely blind to
+    calibration. You can stop at an iteration with great AUC and terrible
+    probabilities. If you need probabilities, EARLY-STOP ON LOG LOSS.
+
+5.3 How to check
+----------------
+  - RELIABILITY DIAGRAM: bin predictions into deciles, plot mean predicted vs
+    observed frequency. Perfect calibration is the diagonal. Above the line =
+    underconfident, below = overconfident.
+  - BRIER SCORE: mean squared error of the probabilities. Decomposes into
+    calibration + refinement.
+  - EXPECTED CALIBRATION ERROR (ECE): average gap across the bins.
+
+5.4 How to fix
+--------------
+Fit a small correction on a HELD-OUT set (never the training set):
+
+    PLATT SCALING   - fit a 1-D logistic regression on the raw scores.
+                      Parametric, needs little data, assumes a sigmoid-shaped
+                      distortion.
+    ISOTONIC        - fit a monotone step function. Non-parametric, more
+                      flexible, needs more data (say 1,000+ per class) or it
+                      overfits.
+
+    sklearn: CalibratedClassifierCV(estimator, method='isotonic', cv=...)
+
+Note that calibration NEVER CHANGES THE RANKING (both maps are monotone), so
+AUC is unchanged. It only fixes the numbers.
+
+
+================================================================================
+6) FEATURE IMPORTANCE TYPES DISAGREE
+================================================================================
+
+6.1 The surprise
+----------------
+Same trained XGBoost model, three built-in importance types, three different
+rankings:
+
+    rank    by 'weight'        by 'cover'        by 'gain'
+    ------------------------------------------------------------
+      1     customer_age       region_id         account_balance
+      2     transaction_hour   customer_age      tenure_months
+      3     account_balance    tenure_months     customer_age
+
+All three are "feature importance". The default in the plotting function is
+'weight', which is the worst of the three.
+
+6.2 What each one measures
+--------------------------
+    WEIGHT (frequency)
+        How many times the feature was used in a split, counted across all
+        trees.
+        BIAS: heavily favours HIGH-CARDINALITY and CONTINUOUS features, simply
+        because they offer more candidate thresholds and therefore get chosen
+        more often. A binary flag can only be split on once per path; a
+        continuous feature can be split on at twenty different thresholds. This
+        is why timestamps and IDs always look "important" by weight.
+
+    COVER
+        The average number of rows (technically the sum of hessians) affected
+        by splits on this feature.
+        Measures REACH, not usefulness. A root split always has huge cover even
+        if its gain was mediocre.
+
+    GAIN
+        The total loss reduction attributable to splits on this feature.
+        The most meaningful of the three, and the one to use if you must use a
+        built-in. Still biased: among CORRELATED features, whichever happened
+        to be picked first takes all the credit and its twin looks worthless.
+        Also computed on TRAINING data, so it can reward overfitting splits.
+
+LightGBM offers 'split' (= weight) and 'gain'. Always say which you mean.
+
+6.3 What to trust instead
+-------------------------
+    PERMUTATION IMPORTANCE
+        Shuffle one column in the VALIDATION set, measure how much the metric
+        drops. Directly answers "does this feature help me predict unseen
+        data", which is usually the actual question.
+        Limits: expensive (one pass per feature), and with correlated features
+        the shuffled column's information is still available via its twin, so
+        both look unimportant.
+
+    SHAP (TreeSHAP)
+        Game-theoretic credit assignment with consistency guarantees, exact and
+        fast for trees. Gives per-row explanations as well as a global ranking,
+        and shows DIRECTION (does high income push the prediction up or down),
+        which no importance score does.
+        Limits: still struggles to split credit between correlated features,
+        and interventional vs conditional variants answer subtly different
+        questions.
+
+    DROP-COLUMN RETRAINING
+        Retrain without the feature and measure the drop. The gold standard for
+        "do I need this feature in the pipeline". Costs one full retrain per
+        feature, so reserve it for the shortlist.
+
+6.4 The rule
+------------
+NEVER REPORT A FEATURE IMPORTANCE WITHOUT SAYING WHICH TYPE IT IS. And if the
+decision matters - dropping a feature, explaining a model to a regulator,
+telling a product team what drives churn - use permutation importance or SHAP
+on held-out data, not the default bar chart.
+
+
+================================================================================
+7) CATEGORICALS GONE WRONG
+================================================================================
+
+7.1 One-hot blowup
+------------------
+    user_id with 1,000,000 levels, one-hot encoded
+        -> a 1,000,000-column matrix
+        -> each column is 1 for a single row
+
+Two disasters at once. Memory explodes, and every single dummy is useless: a
+split on "is this user #418,322" isolates one row, which is pure memorisation.
+Even moderate cardinality hurts - trees split on ONE column at a time, so a
+50-level one-hot city feature forces the tree to spend 49 splits to express
+what one categorical split could say.
+
+Rule of thumb: one-hot is fine below ~10-15 levels. Above that, stop.
+
+7.2 Label/ordinal encoding invents an order
+-------------------------------------------
+    Mumbai=0, Delhi=1, Pune=2, Chennai=3, ...
+
+The tree will split on "city_code < 2.5", which groups {Mumbai, Delhi, Pune}
+against the rest. That grouping is an artefact of your alphabetical sort. It is
+not always fatal - with enough splits a tree can carve out any subset, and
+boosting has many trees to do it - but you are forcing the model to spend
+capacity undoing an ordering you invented. It is genuinely harmful at high
+cardinality.
+
+Exception: GENUINELY ORDINAL features (small < medium < large, bronze < silver
+< gold) should be integer-encoded in the correct order. That is not a hack,
+that is correct.
+
+7.3 Leaky target encoding
+-------------------------
+Covered in detail in lightgbm_catboost.txt section 5. The short version:
+replacing a category with the mean target of that category puts the row's OWN
+LABEL inside its own feature. Training error collapses, validation does not
+move, and if you compute the encoding before splitting your data, even your
+validation score is contaminated and you will ship a broken model believing it
+is excellent.
+
+    SAFE ways to do it:
+      - out-of-fold encoding (compute each fold's values from the other folds)
+      - CatBoost's ordered target statistics (prefix-only, by construction)
+      - always with smoothing toward the global prior for rare categories
+      - compute it INSIDE the cross-validation loop, never before it
+
+7.4 Native categorical handling, and its own trap
+-------------------------------------------------
+LightGBM's categorical_feature sorts the categories by their gradient statistic
+and finds the best PARTITION into two groups (Fisher's method). Far more
+efficient than one-hot - one split can express {Mumbai, Pune} vs everything
+else.
+
+The trap: with high cardinality this is enormously flexible and overfits
+readily. There are 2^(k-1) - 1 possible partitions of k categories. Guard with
+min_data_per_group and cat_smooth, and consider capping cardinality first.
+
+7.5 Unseen categories at inference
+----------------------------------
+A city that was not in the training data arrives in production. What happens
+depends entirely on your encoding:
+    one-hot        -> all zeros; usually survives, silently
+    label encoding -> either a crash or a wrong code
+    target enc.    -> no value exists; must fall back to the global prior
+    native cat     -> handled, usually routed with the missing/default branch
+
+Decide this deliberately and TEST IT. "Unseen category" is one of the most
+common production exceptions in tabular ML, and it always arrives on a weekend.
+
+7.6 The practical ladder
+------------------------
+    < 15 levels                   one-hot, or native categorical
+    15 - 1,000 levels             native categorical (LightGBM/CatBoost), or
+                                  out-of-fold target encoding
+    > 1,000 levels                CatBoost's ordered TS, or group rare levels
+                                  into "other", or replace the ID with
+                                  aggregate features (count, mean, recency)
+    true identifiers (user_id)    usually DROP IT, and engineer behavioural
+                                  features from that user's history instead
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+Boosting chases whatever is still wrong, and every failure mode follows from
+that. It does overfit - training loss falls forever and validation traces a U,
+and the myth comes from AdaBoost's clean-data margin behaviour and from how flat
+that U is at a small learning rate. Mislabeled rows are the thing it can never
+fit, so it chases them hardest, and how much damage that does is set by how fast
+the loss grows when a row is very wrong: exponential is catastrophic, squared is
+bad for heavy tails, log loss and MAE are bounded and safe. The output is a sum
+of leaf constants, so it is FLAT outside the training range - fatal for trended
+time series unless you difference the target or boost a linear model's
+residuals. Under imbalance the loss is owned by the majority, so use
+scale_pos_weight and tune the decision threshold on validation, and avoid
+resampling, which restates the same idea by distorting the dataset and fights
+the gradients. Log loss makes boosted probabilities reasonably calibrated, but
+many rounds, class weighting, or early stopping on AUC break that, so check a
+reliability diagram and fix with Platt or isotonic on held-out data. The three
+built-in importance types measure different things and rank features
+differently - weight favours high-cardinality features, gain is the least bad -
+so decide with permutation importance or SHAP on held-out data. And categorical
+features are where pipelines quietly die: one-hot explodes, label encoding
+invents an order, naive target encoding leaks the row's own label, native
+handling overfits at high cardinality, and unseen categories break inference.

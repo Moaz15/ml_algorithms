@@ -1,0 +1,515 @@
+BOOSTING - 1.6 LIGHTGBM AND CATBOOST
+================================================================================
+The two libraries that came after XGBoost, each solving a different problem it
+left open. Read xgboost.txt first.
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+By 2016 XGBoost worked, and two complaints remained.
+
+  "IT IS STILL TOO SLOW ON BIG DATA."
+      Microsoft's answer was LightGBM (2017). Everything in it is an attack on
+      the cost of finding a split: bin the features, grow trees greedily toward
+      the best leaf, throw away rows that have nothing left to teach, and merge
+      features that never co-occur.
+
+  "IT IS BAD WITH CATEGORICAL FEATURES, AND IT CHEATS ON ITS OWN TRAINING DATA."
+      Yandex's answer was CatBoost (2017). It handles categories natively
+      instead of making you one-hot them, and it fixes a subtle statistical bug
+      that every other boosting library has.
+
+Same algorithm underneath - both are gradient boosting with second-order
+information. The differences are in HOW A SPLIT IS FOUND (LightGBM) and WHAT
+THE TARGETS ARE FITTED TO (CatBoost).
+
+
+================================================================================
+1) HISTOGRAM BINNING
+================================================================================
+
+1.1 The example
+---------------
+You have 1,000,000 rows and a feature "household income" with 900,000 distinct
+values. Exact split finding sorts those values and tests a threshold between
+every adjacent pair - 900,000 candidate splits for ONE feature at ONE node.
+
+Now ask: is the split "income > 61,402" meaningfully different from "income >
+61,455"? Almost never. You are spending enormous effort distinguishing
+thresholds that separate three rows.
+
+1.2 The fix
+-----------
+Before training, bucket each feature into at most max_bin bins (default 255).
+Income becomes an integer 0-254. Now:
+
+    candidate splits per feature per node:   254, not 900,000
+
+For each node you make ONE PASS over the rows, accumulating (sum of g, sum of
+h, count) into the 255 bins, then scan the 255 bins to find the best split.
+
+    cost goes from  O(rows * log rows)  for the sort
+                to  O(rows)             for the histogram build
+                  + O(bins)             for the scan
+
+1.3 The memory win, which matters just as much
+----------------------------------------------
+A bin index fits in ONE BYTE. A float32 feature value takes four.
+
+    1M rows x 100 features
+        as float32:  400 MB
+        as uint8  :  100 MB          -> 4x more data fits in RAM and in cache
+
+And XGBoost's pre-sorted column blocks also had to store a row index per value
+(another 4 bytes) - histograms do not need that at all.
+
+1.4 The histogram subtraction trick
+-----------------------------------
+The cheapest optimisation in the whole field:
+
+    histogram(parent)  =  histogram(left child)  +  histogram(right child)
+
+So build the histogram for whichever child has FEWER rows, and get the sibling
+for free by subtraction. You never build more than half the histograms.
+
+    parent 100,000 rows -> children of 20,000 and 80,000
+    build the 20,000-row histogram (cheap), subtract to get the 80,000-row one
+
+1.5 The cost
+------------
+You lose the ability to split between two values in the same bin. In practice
+this costs almost nothing - and it even acts as mild regularization, since
+those ultra-fine splits were mostly noise. Raise max_bin if a feature is
+genuinely concentrated in a narrow range; lower it (63, 127) for more speed and
+more regularization.
+
+Note: XGBoost adopted this too - tree_method='hist' is the default now. This is
+no longer a LightGBM-only advantage.
+
+
+================================================================================
+2) LEAF-WISE VS LEVEL-WISE GROWTH
+================================================================================
+
+2.1 The two strategies
+----------------------
+    LEVEL-WISE (depth-wise) - XGBoost's classic default
+        Split EVERY node at the current depth before going deeper.
+        Produces balanced trees. Depth is the natural control.
+
+              [root]                      every node at a level is split,
+             /      \                     whether or not it is worth it
+         [A]          [B]
+        /   \        /   \
+      [ ]   [ ]    [ ]   [ ]
+
+    LEAF-WISE (best-first) - LightGBM's default
+        Among ALL current leaves anywhere in the tree, split the ONE with the
+        highest gain. Repeat until num_leaves is reached.
+
+              [root]                      the tree goes deep where the signal
+             /      \                     is and stays shallow where it is not
+         [A]          [B]
+        /   \
+      [ ]   [C]
+            /  \
+          [ ]  [ ]
+
+2.2 Why leaf-wise is better, with a number
+------------------------------------------
+Say you have a budget of 8 leaves. Suppose the available gains are:
+
+    splitting node A -> gain 50
+    splitting node B -> gain  2
+    splitting node C -> gain 40   (C only exists if you split A first)
+
+Level-wise must split A and B together, spending leaves on B's worthless split.
+Leaf-wise splits A, then looks again, sees C's gain of 40 and takes it, never
+touching B. For the same number of leaves, leaf-wise reaches a lower loss.
+
+2.3 Why it overfits more readily
+--------------------------------
+Because nothing stops it going deep. If one branch keeps producing the highest
+gain, leaf-wise will keep following it down 20 levels, carving out a path to a
+leaf holding 4 training rows. That path is likely memorisation.
+
+Level-wise has an accidental safety property: to reach depth 20 it must build
+2^20 nodes, so depth caps complexity automatically. Leaf-wise can reach depth 20
+with 21 leaves.
+
+2.4 How to control it
+---------------------
+    num_leaves        the primary capacity knob. Default 31. This is THE
+                      overfitting parameter in LightGBM.
+    max_depth         a hard ceiling on top of num_leaves. Set it.
+    min_data_in_leaf  the real safety net - stops 4-row leaves existing.
+                      Default 20; raise to 100+ on noisy data.
+
+    Respect:  num_leaves  <  2^max_depth
+    (num_leaves=1024 with max_depth=7 is impossible - depth silently wins.)
+
+LightGBM's reputation for "overfitting on small data" is really a reputation for
+"its defaults are tuned for large data". On 5,000 rows, drop num_leaves to
+10-20 and raise min_data_in_leaf.
+
+Note: XGBoost can do the same thing with grow_policy='lossguide'. The strategy
+is not locked to the library.
+
+
+================================================================================
+3) GOSS: GRADIENT-BASED ONE-SIDE SAMPLING
+================================================================================
+
+3.1 The observation
+-------------------
+After a few hundred rounds, most training rows are already well predicted.
+Their gradients are near zero. From xgboost.txt section 5.3, the gradient (and
+hessian) is exactly how much a row contributes to the split decision - so those
+rows are contributing almost nothing while costing full price to scan.
+
+3.2 The naive fix and why it is wrong
+-------------------------------------
+Just randomly sample 30% of the rows (plain subsampling). The problem: you throw
+away 70% of the LARGE-gradient rows too, and those are the only rows that
+matter. You have paid an accuracy price for your speed.
+
+3.3 GOSS
+--------
+Keep all the important rows, sample only the boring ones:
+
+    1. Sort rows by |gradient|, descending.
+    2. Keep the TOP a% outright.                        (a = 0.2, say)
+    3. From the remaining (1-a)%, randomly sample b%.   (b = 0.1, say)
+    4. AMPLIFY the sampled small-gradient rows by (1-a)/b when computing gain.
+
+    rows used = 20% + 0.1 * 80% = 28% of the data
+
+3.4 Why step 4 is the whole trick
+---------------------------------
+Without the amplification you have changed the data distribution - you kept all
+the extreme rows and only a tenth of the ordinary ones, so the split gains would
+be systematically biased toward the extremes.
+
+Multiplying the sampled small-gradient rows by (1-a)/b = 0.8/0.1 = 8 makes them
+STAND IN for the 8x more rows they were drawn from. The estimated gain is then
+approximately unbiased, and the paper bounds the approximation error, which
+shrinks as the dataset grows.
+
+3.5 When to use it
+------------------
+boosting_type='goss'. It is NOT the default (the default is plain 'gbdt'),
+because on moderate data normal subsampling is fine and simpler. Reach for GOSS
+on very large datasets where scanning every row every round is the bottleneck.
+Note that GOSS and bagging_fraction are mutually exclusive - GOSS replaces it.
+
+
+================================================================================
+4) EFB: EXCLUSIVE FEATURE BUNDLING
+================================================================================
+
+4.1 The example
+---------------
+You one-hot encoded a "city" column with 2,000 cities. You now have 2,000 binary
+features, and for any given row, EXACTLY ONE of them is 1. They are MUTUALLY
+EXCLUSIVE - no two of them are ever nonzero on the same row.
+
+Split finding costs O(features), and you just multiplied your feature count by
+2,000 to store what is really one column of information.
+
+4.2 The fix
+-----------
+Bundle mutually exclusive features into a single feature by giving each one its
+own slice of the bin range.
+
+    feature A uses bins  0-9     ->  stays as bins  0-9
+    feature B uses bins  0-5     ->  becomes bins  10-15   (offset by 10)
+    feature C uses bins  0-7     ->  becomes bins  16-23   (offset by 16)
+
+    bundled feature now uses bins 0-23, and one histogram covers all three.
+
+Because the features never co-occur, a row's value in the bundle is unambiguous
+- you can always tell which original feature it came from by which range the
+bin falls in. No information is lost, and splits on the bundle are still
+splits on the original features.
+
+    2,000 one-hot columns  ->  a handful of bundles
+    histogram building cost drops by the same factor
+
+4.3 The details worth knowing
+-----------------------------
+  - Finding the optimal bundling is GRAPH COLORING (features are vertices,
+    conflicts are edges), which is NP-hard, so LightGBM uses a greedy
+    approximation sorted by conflict degree.
+  - It allows a small CONFLICT TOLERANCE: features that co-occur on a tiny
+    fraction of rows can still be bundled, accepting a little noise for a much
+    better bundling. Controlled by max_conflict_rate.
+  - It only helps on SPARSE data. On a dense numeric matrix, nothing is
+    mutually exclusive and EFB does nothing.
+
+4.4 The honest note
+-------------------
+EFB is the least important of LightGBM's four ideas today, because the better
+answer to "I have a 2,000-level categorical" is to not one-hot it at all - use
+LightGBM's native categorical support or CatBoost (section 5).
+
+
+================================================================================
+5) CATBOOST'S TARGET STATISTICS FOR CATEGORICALS
+================================================================================
+
+5.1 The idea
+------------
+Instead of one-hot encoding a category, replace it with a NUMBER SUMMARISING THE
+TARGET for that category. "City = Mumbai" becomes "the average conversion rate
+of Mumbai rows".
+
+    city        rows    conversions    target statistic
+    Mumbai      4,000       800             0.200
+    Delhi       3,500       525             0.150
+    Pune          900       135             0.150
+    Nashik          3         3             1.000     <- look at this one
+
+One column instead of 2,000. Trees can split on it meaningfully. This is
+classic TARGET ENCODING / mean encoding.
+
+5.2 The two ways it breaks
+--------------------------
+LEAKAGE. The row's own label is inside its own feature value. For Nashik with
+3 rows, the encoded value is 1.000 largely BECAUSE of the row you are about to
+predict. The model learns "when the encoded value is 1.0, predict 1", which
+works perfectly on training data and is worthless on new data. Training error
+collapses, test error does not move. This is one of the classic ways to destroy
+a model while believing it is excellent.
+
+RARE CATEGORIES. A category with 3 rows gets a statistic estimated from 3 rows.
+It is almost pure noise, and the tree will happily split on it.
+
+5.3 The standard fix (smoothing) and why it is not enough
+----------------------------------------------------------
+Shrink rare categories toward the global average:
+
+    encoded  =  ( sum of y in category  +  a * prior )  /  ( count  +  a )
+
+    with prior = global mean, a = smoothing strength (say 10)
+
+    Nashik:  (3 + 10*0.18) / (3 + 10)  =  4.8 / 13  =  0.369
+             instead of 1.000 - much more sensible.
+
+This fixes rare categories. It does NOT fix leakage - the row's own label is
+still in the numerator.
+
+5.4 CatBoost's fix: ORDERED TARGET STATISTICS
+---------------------------------------------
+Impose a random permutation on the rows and pretend they arrived over time.
+For each row, compute its encoding using ONLY THE ROWS THAT CAME BEFORE IT.
+
+    permutation order:   r7  r3  r9  r1  r5  r2 ...
+
+    encoding for r5  =  ( sum of y over {r7,r3,r9,r1} that share r5's category
+                          + a * prior )
+                        / ( count of those + a )
+
+The row's own label is structurally impossible to use - it has not "happened"
+yet. This is the same principle as out-of-fold target encoding, but taken to
+the limit of one row at a time, so no information from the future leaks at all.
+
+Two refinements:
+  - Early rows in the permutation have very few predecessors, so their
+    estimates are high-variance. CatBoost uses SEVERAL DIFFERENT PERMUTATIONS
+    and averages, so no row is unlucky in every one.
+  - It also builds combinations of categorical features (city x device) greedily
+    during tree construction, encoded the same way - which captures categorical
+    interactions that one-hot + trees would need many splits to find.
+
+5.5 The comparison to remember
+------------------------------
+    one-hot             safe, explodes in width, useless above ~100 levels
+    label/ordinal       compact, invents a false ordering the tree will split on
+    naive target enc.   compact and powerful, LEAKS
+    K-fold target enc.  compact, mostly safe, a fold boundary still leaks a
+                        little, and you must apply it identically at inference
+    ordered TS          compact, no leakage by construction - CatBoost's default
+
+
+================================================================================
+6) ORDERED BOOSTING AND PREDICTION SHIFT
+================================================================================
+
+6.1 The bug that is in every other boosting library
+---------------------------------------------------
+Go back to the core loop (gradient_boosting.txt section 3). At round m you:
+
+    compute the residual of row i  USING A MODEL THAT WAS TRAINED ON ROW i
+
+Row i helped build F_(m-1). So F_(m-1)(x_i) is a slightly optimistic prediction
+for row i - better than it would be for an unseen row with the same features.
+Therefore the residual r_i is slightly too small.
+
+The gradients you fit the next tree to are systematically biased. Their
+distribution on training data is not the distribution you will see at inference.
+CatBoost calls this PREDICTION SHIFT, and it is a cousin of the target-encoding
+leakage in section 5 - the same mistake, one level up.
+
+6.2 Why it usually goes unnoticed
+---------------------------------
+Because the bias is small when each row is one of a million, and because
+shrinkage and subsampling partly mask it. It matters most on SMALL DATASETS,
+where each row has real influence on the model that then evaluates it, and it
+shows up as a train/test gap you cannot close by tuning.
+
+6.3 Ordered boosting
+--------------------
+The same permutation trick as section 5, applied to the residuals:
+
+    To compute the residual for row i, use a model trained ONLY on the rows
+    that precede i in the permutation.
+
+Done literally, this needs a separate model for every prefix of the
+permutation - n models, which is absurd. CatBoost approximates it by maintaining
+a logarithmic number of SUPPORTING MODELS (one per 2^j prefix) and using the
+appropriate one for each row, plus multiple permutations to reduce variance.
+
+6.4 What to actually say about it
+---------------------------------
+  - It is a genuine statistical correction, not a marketing feature: CatBoost's
+    paper shows the bias formally.
+  - It is slower than the plain mode, which CatBoost also offers
+    (boosting_type='Plain'). CatBoost uses Ordered by default on small datasets
+    and Plain on large ones, because the bias vanishes as n grows.
+  - It is the main reason CatBoost often wins on small, categorical-heavy
+    tabular datasets with no tuning at all.
+
+
+================================================================================
+7) OBLIVIOUS (SYMMETRIC) TREES
+================================================================================
+
+7.1 What they are
+-----------------
+A normal tree asks a different question at every node. An OBLIVIOUS tree asks
+THE SAME QUESTION AT EVERY NODE OF A LEVEL.
+
+    Normal tree, depth 2:
+                 [income > 50k]
+                /              \
+        [age > 30]            [city = Delhi]        <- different questions
+
+    Oblivious tree, depth 2:
+                 [income > 50k]
+                /              \
+        [age > 30]            [age > 30]            <- same question, forced
+
+So the whole tree is just an ordered LIST of conditions, one per level.
+
+7.2 Why that is fast at inference
+---------------------------------
+With depth 6 and the same 6 conditions for everyone, evaluating the tree is:
+
+    evaluate 6 boolean conditions  ->  pack them into a 6-bit integer
+                                       (0 to 63)
+    index into a 64-element array of leaf values
+
+No branching. No pointer chasing. No tree traversal at all. It vectorises, it
+is cache-friendly, and the leaf values of a whole tree fit in one small array.
+CatBoost's inference being several times faster than the alternatives is almost
+entirely this.
+
+It is also why oblivious trees are easy to implement efficiently on GPU - every
+row does identical work, which is exactly what a GPU wants.
+
+7.3 The trade
+-------------
+An oblivious tree is far less expressive than a free-form tree of the same
+depth: it is forced to apply conditions it may only need on one branch. So you
+need MORE TREES to reach the same accuracy.
+
+In exchange, that restriction is a REGULARIZER. The model cannot carve out a
+hyper-specific region of feature space in a single tree, which is precisely the
+move that overfits. On small and noisy data this frequently comes out ahead.
+
+Summary: fewer degrees of freedom per tree, more trees, dramatically faster
+inference, less overfitting. A reasonable trade, and unique to CatBoost among
+the three.
+
+
+================================================================================
+8) CHOOSING BETWEEN XGBOOST, LIGHTGBM AND CATBOOST
+================================================================================
+
+8.1 The honest headline
+-----------------------
+ON MOST TABULAR PROBLEMS, ALL THREE LAND WITHIN NOISE OF EACH OTHER ONCE TUNED.
+Benchmark papers keep finding this. So choose on data shape, categorical
+handling and engineering constraints - not on a belief that one is "the
+accurate one".
+
+8.2 The table
+-------------
+                       XGBOOST            LIGHTGBM           CATBOOST
+    --------------------------------------------------------------------------
+    Tree growth        level-wise         leaf-wise          oblivious,
+                       (lossguide avail.) (best-first)       symmetric
+    Speed, big data    fast (hist)        FASTEST            moderate
+    Speed, small data  fast               fast               slower (ordered)
+    Categoricals       you encode them    native, decent     NATIVE, BEST
+    Missing values     default direction  handled            handled
+    Overfit risk       moderate           HIGHEST            lowest
+      (at defaults)                       (num_leaves)
+    Default quality    good               needs tuning       EXCELLENT
+    Inference speed    good               good               FASTEST
+    GPU support        good               good               excellent
+    Ecosystem/docs     most mature        good               good
+    Small noisy data   ok                 weakest            strongest
+
+8.3 Pick by situation
+---------------------
+    Many categorical features, especially high-cardinality
+        -> CATBOOST. This is the clearest win available. Do not one-hot 2,000
+           cities and feed them to XGBoost.
+
+    Millions of rows, training time is the bottleneck
+        -> LIGHTGBM. Leaf-wise + histograms + GOSS is the fastest combination
+           available on CPU.
+
+    Small dataset (< ~10k rows), noisy labels, little time to tune
+        -> CATBOOST. Ordered boosting and oblivious trees both help exactly
+           here, and the defaults are the best of the three.
+
+    You want the safest, best-documented, most widely deployed option, and your
+    features are mostly numeric
+        -> XGBOOST. Nobody will question it, every platform supports it, and
+           tree_method='hist' closed most of the speed gap years ago.
+
+    You need the fastest possible INFERENCE
+        -> CATBOOST (oblivious trees), or compile any of them with Treelite /
+           ONNX.
+
+8.4 The practical answer for an interview
+-----------------------------------------
+"I would start with LightGBM or XGBoost for a quick baseline, switch to CatBoost
+if the data is categorical-heavy or small, and I would expect the final accuracy
+difference after tuning to be smaller than the difference from one good feature.
+The library choice is mostly an engineering decision - training time, inference
+latency, how much encoding work I want to own, and what the deployment stack
+already supports."
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+LightGBM is four speed ideas stacked: bin every feature into 255 buckets so
+split finding costs bins instead of rows (and a bin index is one byte, with the
+sibling histogram free by subtraction), grow leaf-wise so the tree goes deep
+only where the gain is - which is better per leaf but overfits unless you cap
+num_leaves and min_data_in_leaf - keep all the large-gradient rows while
+subsampling and up-weighting the rest (GOSS), and merge mutually exclusive
+sparse features into one by offsetting their bin ranges (EFB). CatBoost instead
+attacks two statistical bugs: target encoding a category leaks the row's own
+label, so it computes the statistic from only the rows preceding it in a random
+permutation, and the ordinary boosting loop computes each row's residual from a
+model that was trained on that row, which biases the gradients - ordered
+boosting fixes that with the same permutation trick, and matters most on small
+data. Its oblivious trees use one condition per level, making a tree a 6-bit
+array lookup, which is both a regularizer and the reason its inference is the
+fastest. After tuning all three usually land within noise of each other, so
+pick CatBoost for categorical-heavy or small data, LightGBM for very large data,
+and XGBoost when you want the mature default.

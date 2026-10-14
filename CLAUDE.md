@@ -27,6 +27,34 @@ When asked to add or extend an `interview_qa.txt` file:
 - Favor the kind of questions a FAANG panel asks a Senior MLE candidate: intuition checks ("why does X work"), failure modes ("what breaks if Y"), bias-variance/complexity trade-offs, and comparisons between related algorithms (e.g. "how does bagging differ from boosting").
 - Where it aids revision, end an answer with a natural follow-up question an interviewer might ask next, to encourage drilling deeper.
 
+## Theory-note writing style
+
+Notes are plain text, ASCII only, wrapped at ~100 columns, no emojis. Beyond that, follow the
+shape used in `regularization_concept.txt` sections 2.6 and 2.7 - it is the house style:
+
+- **Lead with the answer.** The definition or conclusion is the first sentence, never the last. If
+  a heading asks two things ("what it is, and why it works"), answer them in that order under CAPS
+  labels: `WHAT IT IS`, `WHY IT WORKS`, `THE PROBLEM`.
+- **Pointer bullets over paragraphs.** Anything enumerable - options being compared, when to reach
+  for something, what it costs - becomes a named header line followed by `-->` bullets:
+
+      MORE DATA - the only one that cuts variance without adding any bias
+      --> use it whenever it is available and affordable
+      --> it cannot rescue a model that is too simple - that is bias, not variance
+
+  Give every item in a comparison the same bullet slots, so the reader can scan one slot down the
+  list. Reserve running prose for a narrative that genuinely carries a hard idea.
+- **Aligned two-column lists** for mechanism or hyperparameter enumerations: the setting on the
+  left, a one-line consequence on the right, padded to a common column.
+- **One metaphor per concept, reused.** The L1/L2 geometry is a stone, ripples and a fence, and
+  every later sentence in that subsection reuses those three nouns. Do not stack metaphors.
+- **Concrete numbers inline** - `(1.0, 0.0)`, `learning_rate = 0.05`, `round 300 of 2000` - wherever
+  a number can replace an abstraction.
+- **Close every subsection** with a `> Real-world:` block and a `> Likely follow-up:` block (the
+  question an interviewer asks next, plus the answer).
+- **Converting prose to this style must not grow the section.** Net-neutral or shorter, unless the
+  rewrite is adding a concept that was missing.
+
 ## Implementation style
 
 Scratch implementations follow scikit-learn's shape: a class with `__init__` hyperparameters, `fit_*` training methods (often multiple, e.g. `fit_ols` vs `fit_gradient_descent`, `fit_gd`), and `predict`. Fitted parameters are stored as instance attributes (`self.theta`, `self.bias`, `self.centroids`, `self.inertia_`). Numerical-stability guards are used deliberately (`np.clip` on sigmoid inputs, epsilon in log loss, `np.isclose` on OLS denominators) — preserve these when editing. Inputs are coerced with `np.asarray(..., dtype=float)`.

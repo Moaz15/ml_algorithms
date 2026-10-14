@@ -1,0 +1,405 @@
+BOOSTING - 1.4 REGULARIZATION AND TUNING
+================================================================================
+Boosting will fit your training set perfectly if you let it. This file is about
+the knobs that stop it, and the order to turn them in.
+Read foundations.txt and gradient_boosting.txt first.
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+Think of boosting as walking toward a target in the dark.
+
+  - SHRINKAGE (nu) is how big each step is. Small steps are slower but you are
+    much less likely to walk straight past the target.
+  - NUMBER OF ROUNDS (M) is how many steps you take. Too few and you never
+    arrive; too many and you walk past it.
+  - SUBSAMPLING is closing one eye each step so you do not over-trust any single
+    look at the data.
+  - TREE SIZE LIMITS cap how far one single step is allowed to carry you.
+  - L1/L2 PENALTIES pull every step slightly back toward zero.
+  - CONSTRAINTS are a rule like "never walk downhill", enforced regardless of
+    what the data seems to say.
+
+Every regularizer in boosting is one of those six things. There is no seventh
+idea hiding anywhere.
+
+
+================================================================================
+1) SHRINKAGE: THE LEARNING RATE
+================================================================================
+
+1.1 What it is
+--------------
+    F_m(x)  =  F_(m-1)(x)  +  nu * h_m(x)        with  0 < nu <= 1
+
+nu (learning_rate, eta) says what fraction of each new tree you actually keep.
+At nu = 0.1 you throw away 90% of every tree's advice.
+
+1.2 Why throwing away 90% of the work helps
+-------------------------------------------
+Because each tree is fitted to a NOISY target. The pseudo-residuals contain both
+real signal and the random quirks of your particular training sample. A tree
+added at full strength commits to both. A tree added at 10% commits mostly to
+the part that the next 50 trees will agree with - the random parts do not
+reinforce each other, the real signal does.
+
+It is the same reason you average 100 trees in a random forest rather than
+trusting one, except here the averaging happens over SEQUENTIAL steps.
+
+1.3 The trade against the number of trees
+-----------------------------------------
+nu and M are not independent knobs. They multiply.
+
+    RULE OF THUMB: halve nu, and you need roughly twice as many trees.
+
+    nu = 0.30   ->  ~  200 trees         fast, noticeably worse generalisation
+    nu = 0.10   ->  ~  600 trees         the standard starting point
+    nu = 0.05   ->  ~1,200 trees         typical for a final model
+    nu = 0.01   ->  ~6,000 trees         when accuracy matters more than time
+
+Lower nu is almost always better for ACCURACY and always worse for TRAINING
+TIME. So the real decision is "how much compute am I willing to spend", and the
+answer is usually 0.05 for a shipped model, 0.1 while iterating.
+
+1.4 The trap
+------------
+Lowering nu without raising M makes the model WORSE, not better. You have
+shortened the steps without taking more of them, so you stop short of the
+target - that is plain underfitting. Never tune nu without early stopping
+active (section 2).
+
+
+================================================================================
+2) EARLY STOPPING: THE HONEST WAY TO PICK n_estimators
+================================================================================
+
+2.1 Why M cannot be guessed
+---------------------------
+From foundations.txt section 5: training loss falls EVERY round by
+construction. It carries zero information about when to stop. The right M
+depends on nu, tree depth, dataset size, and noise level - all at once. Any
+fixed number you hard-code is wrong for the next dataset.
+
+2.2 The procedure
+-----------------
+    1. Split off a validation set the model never trains on.
+    2. Set M very high (say 10,000) - you are not going to reach it.
+    3. Evaluate the validation metric every round.
+    4. If it has not improved for `early_stopping_rounds` consecutive rounds
+       (patience, typically 50), stop.
+    5. KEEP THE BEST ITERATION, not the last one.
+
+        xgboost  : early_stopping_rounds=50, then model.best_iteration
+        lightgbm : callbacks=[lgb.early_stopping(50)], model.best_iteration_
+        sklearn  : n_iter_no_change=50, validation_fraction=0.1
+
+2.3 Why patience exists
+-----------------------
+The validation curve is noisy. It goes up for 8 rounds and then down for 30.
+Stopping at the first uptick would cut the model off far too early. Patience of
+50 says "I need 50 consecutive rounds of no improvement before I believe it".
+
+2.4 The traps
+-------------
+  - EARLY STOPPING ON THE TEST SET IS LEAKAGE. You have used the test set to
+    choose a hyperparameter, so it is no longer an unbiased estimate. You need
+    three splits: train / validation (for stopping) / test (touched once).
+  - Early stopping on a RANK-ONLY metric like AUC optimises ranking, not
+    calibration. If you need probabilities, stop on log loss. See
+    failure_modes.txt section 5.
+  - After tuning everything, it is common to retrain on train+validation using
+    the M that early stopping found (sometimes scaled up slightly for the extra
+    data). Doing this gives up your stopping signal, so only do it last.
+  - With cross-validation, use xgb.cv / lgb.cv which gives you the best round
+    averaged over folds, rather than early-stopping each fold separately.
+
+
+================================================================================
+3) ROW AND COLUMN SUBSAMPLING
+================================================================================
+
+3.1 What they are
+-----------------
+    subsample / bagging_fraction  = fraction of ROWS used to grow each tree
+                                    (typical 0.5 - 0.8)
+    colsample_bytree / feature_fraction  = fraction of COLUMNS offered per tree
+    colsample_bylevel                    = per depth level
+    colsample_bynode                     = per split
+
+Friedman called row subsampling STOCHASTIC GRADIENT BOOSTING (1999). He found
+it improved accuracy, not just speed - the randomness is a genuine regularizer.
+
+3.2 How this differs from bagging's bootstrap
+---------------------------------------------
+Both sample rows. They are not the same thing.
+
+                          BAGGING / RF              BOOSTING
+    ----------------------------------------------------------------------
+    Sampling              WITH replacement          WITHOUT replacement
+    Sample size           100% of N (with dupes)    50 - 80% of N
+    Fresh sample          per tree, independent     per ROUND, on top of a
+                                                    sequence that already
+                                                    depends on all prior rounds
+    Purpose               make trees independent    perturb the gradient step
+                          so averaging works        so the model cannot
+                                                    over-commit
+    Trees afterwards      still independent         still fully dependent
+    Free validation       yes - OOB rows            no, not reliably
+
+The key conceptual difference: in bagging, resampling is the MECHANISM - without
+it the trees would be identical and averaging would do nothing. In boosting,
+resampling is purely a REGULARIZER bolted onto a mechanism that already works.
+Boosting with subsample=1.0 is a perfectly sensible algorithm; bagging with
+"bootstrap off and 100% of rows" is just one tree, 500 times.
+
+3.3 Column subsampling
+----------------------
+Hiding features forces the model to use alternatives instead of leaning on the
+same dominant feature in every tree. It directly decorrelates the trees - the
+same reason Random Forest does it, used here for the same reason. It also speeds
+up split finding proportionally.
+
+Practical: colsample_bytree 0.6-0.9 is a near-free win when you have many
+features; 1.0 is fine when you have fewer than ~20.
+
+
+================================================================================
+4) TREE-SIZE LIMITS
+================================================================================
+
+These cap the complexity of each individual step.
+
+4.1 max_depth
+-------------
+Maximum levels. Typical 3-8 for boosting. Remember from foundations.txt section
+4: DEPTH IS INTERACTION ORDER. depth 3 means "at most 3 features may conspire".
+A depth of 10+ in a boosted model usually means you are trying to fix an
+underfitting problem with the wrong knob.
+
+4.2 num_leaves (LightGBM)
+-------------------------
+LightGBM grows leaf-wise, so depth is not the natural limit - leaf count is.
+The constraint to respect:
+
+    num_leaves  <  2^max_depth
+
+If you set num_leaves = 1024 with max_depth = 7 (max 128 leaves), the depth cap
+silently wins and your num_leaves setting is a lie. Default 31 is a sane start;
+this is THE main overfitting knob in LightGBM.
+
+4.3 min_child_weight (XGBoost)
+------------------------------
+Despite the name, it is not a row count. It is the MINIMUM SUM OF HESSIANS in a
+leaf. Why that matters:
+
+    squared loss  ->  h_i = 1 for every row, so the sum IS the row count.
+                      min_child_weight = 20 means "at least 20 rows".
+
+    log loss      ->  h_i = p(1-p), which is 0.25 at p=0.5 and ~0.01 at p=0.99.
+                      So 20 confidently-predicted rows contribute only ~0.2,
+                      while 20 uncertain rows contribute 5.0.
+
+So under log loss this parameter means "a leaf must contain enough UNRESOLVED
+signal to be worth creating", which is a smarter criterion than a raw count.
+Raising it is one of the most effective anti-overfitting moves in XGBoost.
+
+4.4 min_samples_leaf / min_data_in_leaf / min_child_samples
+-----------------------------------------------------------
+The plain row count version. Typical 20-100; raise it hard on noisy data. On a
+1M-row dataset, leaves of 20 rows are memorising.
+
+4.5 How these interact
+----------------------
+They are three ways to say the same thing (make the trees simpler), so do not
+crank all three. Pick depth/num_leaves as the primary capacity dial, and one
+minimum-size parameter as the safety net.
+
+
+================================================================================
+5) L1 AND L2 PENALTIES ON THE LEAF WEIGHTS
+================================================================================
+
+5.1 Where they act
+------------------
+Not on feature coefficients - boosted trees have none. They act on the LEAF
+OUTPUT VALUES. The optimal leaf value in XGBoost (derived in xgboost.txt) is:
+
+    w*  =  -G / (H + lambda)
+
+where G and H are the sums of gradients and hessians in that leaf, and lambda
+is reg_lambda (L2).
+
+5.2 What lambda actually does, numerically
+------------------------------------------
+Take a leaf with G = -20, H = 10:
+
+    lambda =  0   ->  w* = 20/10   = 2.00      (unpenalised)
+    lambda =  5   ->  w* = 20/15   = 1.33
+    lambda = 10   ->  w* = 20/20   = 1.00
+    lambda = 40   ->  w* = 20/50   = 0.40
+
+It is a soft brake on every leaf output, and it bites HARDEST on leaves with
+small H - that is, leaves built from few or already-confident rows. Exactly the
+leaves most likely to be fitting noise. That is the elegant part: one parameter,
+and it automatically penalises the untrustworthy leaves more.
+
+5.3 The three penalties in XGBoost
+----------------------------------
+    reg_lambda (L2)   default 1. Shrinks leaf values smoothly. Safe to raise
+                      (try 1, 5, 20, 100). The main one.
+    reg_alpha  (L1)   default 0. Soft-thresholds leaf values, can set them to
+                      exactly 0. Useful with very many features / sparse data.
+    gamma             default 0. Minimum GAIN a split must earn to be kept -
+                      see xgboost.txt section 4. A pruning knob, not a weight
+                      penalty. Try 0, 0.1, 1, 5.
+
+LightGBM calls them lambda_l2, lambda_l1, min_gain_to_split. CatBoost exposes
+l2_leaf_reg.
+
+5.4 Honest expectation
+----------------------
+These usually move your metric by a little. Learning rate, tree size and feature
+quality move it by a lot. Tune them last, and do not be surprised when the
+default lambda=1 wins.
+
+
+================================================================================
+6) MONOTONIC AND INTERACTION CONSTRAINTS
+================================================================================
+
+These are different from everything above: they are PRIORS YOU FORCE ON THE
+MODEL, not penalties. You are not nudging the model, you are declaring certain
+models illegal.
+
+6.1 Monotonic constraints
+-------------------------
+The example that makes it obvious: you are pricing houses, and your model has
+learned - from 8 noisy sales - that houses between 2,400 and 2,600 sqft are
+cheaper than houses at 2,300 sqft. That is noise, and no customer will accept
+"your house is worth less because it is bigger".
+
+    monotone_constraints = [1, 0, -1, 0, ...]      one entry per feature
+         1  = prediction must be NON-DECREASING in this feature
+        -1  = prediction must be NON-INCREASING
+         0  = unconstrained
+
+Real cases:
+    price      must not DECREASE with square footage        ->  +1
+    default risk must not DECREASE with debt-to-income      ->  +1
+    insurance premium must not INCREASE with safety rating  ->  -1
+
+How it is enforced: when considering a split on a constrained feature, the
+library rejects any split whose child values would violate the direction, and it
+clamps descendant leaf values so later splits cannot sneak around it.
+
+Why you would want it:
+  - REGULATORY / EXPLAINABILITY. Credit and insurance models often must be
+    monotone in key variables to be approved.
+  - It is free regularization. A true domain fact injected as a hard constraint
+    removes a whole family of noise-fitting models, so variance drops.
+  - Trust. One nonsensical reversal in a demo destroys confidence in the model.
+
+Cost: a small drop in training fit, and it is WRONG if the true relationship is
+genuinely non-monotone (age vs risk is often U-shaped - do not constrain that).
+
+6.2 Interaction constraints
+---------------------------
+Declare which features are allowed to appear together in the same tree branch.
+
+    interaction_constraints = [[0, 1, 2], [3, 4]]
+
+means features 0,1,2 may interact with each other, 3 and 4 may interact with
+each other, and nothing crosses between the groups.
+
+Uses:
+  - Force an ADDITIVE model: put every feature in its own group, and the
+    ensemble becomes f_1(x_1) + f_2(x_2) + ... which you can plot feature by
+    feature. Same effect as depth 1, but you keep depth for within-group splits.
+  - Block nonsense interactions you know are spurious (e.g. do not let
+    customer_id interact with anything).
+  - Enforce known structure, like "time features interact with each other, not
+    with product features".
+
+Both of these cost you accuracy on the training set and often BUY accuracy on
+the test set, because a correct prior is worth more than the data it replaces.
+
+
+================================================================================
+7) A TUNING ORDER THAT WORKS
+================================================================================
+
+7.1 The order
+-------------
+    STEP 0  Set up early stopping with a real validation split. Without this
+            nothing below is measurable. Fix nu = 0.1 for the whole search.
+
+    STEP 1  CAPACITY. Tune max_depth (3,4,5,6,8) or num_leaves (15,31,63,127).
+            This is the single biggest lever. Then set a minimum leaf size
+            (min_child_weight / min_data_in_leaf) to stop tiny leaves.
+
+    STEP 2  RANDOMNESS. Tune subsample (0.6,0.8,1.0) and colsample_bytree
+            (0.6,0.8,1.0). Cheap, usually a small but reliable gain.
+
+    STEP 3  PENALTIES. Tune reg_lambda (1,5,20,100) and gamma (0,0.1,1,5).
+            Expect small effects. Skip if time is short.
+
+    STEP 4  FINAL MODEL. Drop nu to 0.03-0.05, keep everything else, re-run with
+            early stopping. Accept the longer training time once, at the end.
+
+7.2 Why this order
+------------------
+Each step is roughly independent of the ones below it but NOT of the ones above
+it. Capacity decides how much the randomness and penalties have to rein in, so
+tuning penalties before capacity means redoing them. And nu is held fixed during
+the search because changing it changes the optimal M for every single
+configuration, making the comparisons meaningless.
+
+7.3 Which knobs actually move the number
+----------------------------------------
+    BIG EFFECT
+      - feature engineering (not a hyperparameter, and still the biggest lever)
+      - learning rate x number of trees, with honest early stopping
+      - tree capacity: max_depth / num_leaves
+      - the LOSS FUNCTION, if the default is wrong for your target
+        (see gradient_boosting.txt section 6)
+
+    MODERATE
+      - min_child_weight / min_data_in_leaf, especially on noisy data
+      - subsample and colsample
+      - scale_pos_weight on imbalanced data (failure_modes.txt section 4)
+
+    SMALL - usually not worth a grid search
+      - reg_alpha, reg_lambda, gamma
+      - max_bin, tree_method
+      - everything else
+
+7.4 Practical notes
+-------------------
+  - Use random search or Bayesian optimisation (Optuna), not an exhaustive
+    grid - the response surface is flat in most directions, so a grid wastes
+    almost all its evaluations.
+  - Tune on CV folds, not a single split, unless the dataset is large.
+  - Stop when the improvements are smaller than the fold-to-fold noise. A 0.001
+    AUC gain on one split is not a gain.
+  - A reasonable default config beats a badly tuned one: nu=0.05, depth 6,
+    subsample 0.8, colsample 0.8, early stopping on. Start there.
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+Boosting is regularized in six ways, and they are all "take smaller or less
+confident steps": shrinkage keeps a fraction nu of each tree so the noise in any
+one tree never fully lands, the number of rounds is chosen by early stopping on
+a validation set because training loss falls forever and tells you nothing, row
+and column subsampling perturb each step (unlike bagging's bootstrap, this is a
+regularizer rather than the mechanism, and it is sampling without replacement),
+tree-size limits cap what one step can express - with depth as interaction order
+and min_child_weight as a sum of hessians rather than a row count - and L1/L2
+penalties shrink the leaf outputs themselves, biting hardest on the leaves built
+from the least evidence. Monotonic and interaction constraints are a different
+species: hard priors that declare whole families of model illegal, which costs
+training fit and often buys test accuracy and regulatory approval. Tune in the
+order capacity, then randomness, then penalties, with nu fixed at 0.1 and early
+stopping always on, and lower nu only for the final model - and accept that tree
+depth, the learning-rate/rounds pair and the choice of loss will move your
+metric far more than any penalty term.

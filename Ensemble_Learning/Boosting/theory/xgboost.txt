@@ -1,0 +1,451 @@
+BOOSTING - 1.5 XGBOOST
+================================================================================
+eXtreme Gradient Boosting (Chen & Guestrin, 2016). The implementation that won
+most Kaggle competitions for several years and became the tabular default.
+Read gradient_boosting.txt first - this file is "what XGBoost changed".
+
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+Plain gradient boosting (Friedman, 2001) grows each tree the ordinary way: use a
+standard regression tree to fit the pseudo-residuals, then patch up the leaf
+values afterwards. The tree-growing step and the loss function are two separate
+pieces of machinery that barely talk to each other.
+
+XGBoost's idea: WRITE DOWN ONE OBJECTIVE THAT INCLUDES THE TREE'S COMPLEXITY,
+AND DERIVE EVERYTHING FROM IT. Not just the leaf values - the split criterion
+itself, the pruning rule, the stopping rule. The tree is no longer grown with a
+generic criterion and then corrected; the whole tree is built to minimise the
+actual regularized objective.
+
+That gives it two advantages, and then a third one was bought with engineering:
+  1. a principled split criterion that already knows about regularization,
+  2. second-order (Newton) steps instead of first-order ones,
+  3. an implementation that is 10x faster than what came before.
+
+
+================================================================================
+1) THE REGULARIZED OBJECTIVE
+================================================================================
+
+1.1 The statement
+-----------------
+    Obj  =  SUM_i L( y_i , y_hat_i )   +   SUM_k Omega( f_k )
+
+    where for one tree f with T leaves and leaf values w_1..w_T:
+
+    Omega(f)  =  gamma * T   +   0.5 * lambda * SUM_j w_j^2
+
+Three pieces:
+    SUM L          the usual training loss (squared error, log loss, ...)
+    gamma * T      a FIXED COST PER LEAF. Every leaf must pay gamma in loss
+                   reduction to justify existing.
+    lambda * w^2   an L2 PENALTY ON LEAF OUTPUTS. Big corrections cost more
+                   than small ones.
+
+1.2 Why this is the real difference
+-----------------------------------
+Plain GBM controls complexity from the OUTSIDE: you set max_depth, you set a
+learning rate, and you hope. The tree-growing code itself has no idea that
+regularization exists - it just minimises squared error on the gradients.
+
+XGBoost puts complexity INSIDE the thing being minimised. So when the algorithm
+evaluates a candidate split, the cost of the extra leaf is already in the
+arithmetic. A split that improves the fit by less than gamma is not "allowed but
+discouraged" - it scores negative and is rejected on the spot.
+
+Everything in sections 2-4 is just "solve this objective".
+
+
+================================================================================
+2) SECOND-ORDER TAYLOR EXPANSION
+================================================================================
+
+2.1 The problem being solved
+----------------------------
+At round t you must choose the new tree f_t to minimise
+
+    Obj^(t)  =  SUM_i L( y_i , y_hat_i^(t-1) + f_t(x_i) )  +  Omega(f_t)
+
+L could be anything - log loss, Poisson, Huber. You cannot optimise an arbitrary
+L over tree structures directly. So approximate it with a quadratic, which you
+CAN optimise in closed form.
+
+2.2 The expansion
+-----------------
+Taylor to second order around the current prediction:
+
+    Obj^(t)  ~=  SUM_i [ g_i * f_t(x_i)  +  0.5 * h_i * f_t(x_i)^2 ]  +  Omega(f_t)
+
+    g_i  =  dL( y_i, y_hat )  / d y_hat          the GRADIENT (slope)
+    h_i  =  d^2 L( y_i, y_hat ) / d y_hat^2      the HESSIAN  (curvature)
+
+both evaluated at y_hat^(t-1). Constant terms are dropped - they do not affect
+the argmin.
+
+2.3 g and h for the two losses you will be asked about
+------------------------------------------------------
+    SQUARED ERROR   L = 0.5 (y - y_hat)^2
+        g_i = y_hat - y          (the negative residual)
+        h_i = 1                  (constant! every row has equal curvature)
+
+    LOG LOSS        y in {0,1},  p = sigmoid(y_hat)
+        g_i = p - y              bounded in [-1, 1]
+        h_i = p * (1 - p)        in (0, 0.25]
+
+Read the log-loss hessian carefully, because it is the intuition for everything
+below:
+
+    p = 0.5    ->  h = 0.25     the model is maximally unsure about this row
+    p = 0.9    ->  h = 0.09
+    p = 0.99   ->  h = 0.0099   the model is confident; curvature nearly zero
+
+h is "how much this row still has to teach the model".
+
+2.4 What the second order buys you
+----------------------------------
+  - A NEWTON STEP INSTEAD OF A GRADIENT STEP. Plain GBM moves in the direction
+    of -g and then has to search for how far to go. With h you know the local
+    curvature, so the optimal distance falls out algebraically (section 3). On
+    a steeply curved loss this is a much better step; it is the difference
+    between gradient descent and Newton's method.
+  - ANY TWICE-DIFFERENTIABLE LOSS, FOR FREE. The tree-building code only ever
+    sees two numbers per row, g and h. Supplying a custom loss means supplying
+    a function that returns g and h - nothing else in the library changes.
+  - h BECOMES A NATURAL SAMPLE WEIGHT. Rows the model is already confident
+    about contribute almost nothing. This is exactly why min_child_weight is a
+    sum of hessians rather than a row count (regularization_and_tuning.txt
+    section 4.3): it means "this leaf must contain enough genuine uncertainty
+    to be worth splitting off".
+
+Caveat worth knowing: it requires h > 0. For losses with zero or undefined
+second derivative (plain MAE), XGBoost has to fake it, which is why
+reg:absoluteerror was awkward to support for years.
+
+
+================================================================================
+3) THE OPTIMAL LEAF WEIGHT
+================================================================================
+
+3.1 The derivation (short, do this on a whiteboard)
+---------------------------------------------------
+Fix the tree STRUCTURE for a moment. Every row lands in exactly one leaf, and
+every row in leaf j gets the same output w_j. So regroup the sum by leaf:
+
+    Obj  =  SUM_j [ ( SUM_{i in leaf j} g_i ) * w_j
+                   + 0.5 * ( SUM_{i in leaf j} h_i + lambda ) * w_j^2 ]
+            + gamma * T
+
+Define     G_j = SUM_{i in j} g_i        H_j = SUM_{i in j} h_i
+
+    Obj  =  SUM_j [ G_j * w_j  +  0.5 * (H_j + lambda) * w_j^2 ]  +  gamma * T
+
+Each leaf is now an independent one-variable quadratic a*w + 0.5*b*w^2 with
+b > 0. Differentiate, set to zero:
+
+    G_j + (H_j + lambda) * w_j = 0
+
+    ===>    w_j*  =  - G_j / (H_j + lambda)
+
+Substitute back to get the best achievable objective for this structure:
+
+    Obj*  =  -0.5 * SUM_j  G_j^2 / (H_j + lambda)   +   gamma * T
+
+3.2 Reading the formula
+-----------------------
+    w*  =  - G / (H + lambda)
+
+    numerator   G    -> which way and how strongly this group of rows is wrong
+    denominator H    -> how much curvature (confidence/evidence) is behind them
+    lambda           -> a constant added to the evidence, so a leaf with little
+                        evidence gets shrunk hard toward zero
+
+Numbers (from regularization_and_tuning.txt section 5.2): G = -20, H = 10 gives
+w* = 2.00 at lambda = 0, 1.00 at lambda = 10, 0.40 at lambda = 40.
+
+And note what this is: the exact Newton step for that leaf, with an L2 penalty.
+In gradient_boosting.txt section 5.2 the log-loss leaf value was
+SUM(y-p) / SUM p(1-p) - that is this formula with lambda = 0. XGBoost did not
+invent the leaf solution, it added lambda to it and then used the SAME quantity
+to choose splits, which nobody had done.
+
+3.3 The quantity that matters most
+----------------------------------
+    G_j^2 / (H_j + lambda)
+
+Call it the LEAF SCORE. The best objective is -0.5 * (sum of leaf scores) +
+gamma*T, so maximising total leaf score = minimising the objective. Section 4 is
+nothing but this.
+
+
+================================================================================
+4) THE SPLIT GAIN FORMULA
+================================================================================
+
+4.1 Where it comes from
+-----------------------
+Take one leaf and consider cutting it into Left and Right. Before the cut, that
+leaf contributes score (G_L+G_R)^2 / (H_L+H_R+lambda). After, it contributes
+G_L^2/(H_L+lambda) + G_R^2/(H_R+lambda), and you have added one leaf, costing
+gamma. The improvement in objective:
+
+    Gain = 0.5 * [  G_L^2/(H_L+lambda)
+                  + G_R^2/(H_R+lambda)
+                  - (G_L+G_R)^2/(H_L+H_R+lambda) ]   -   gamma
+
+XGBoost evaluates this for every feature and every candidate threshold, and
+takes the maximum. If the best Gain is <= 0, THE NODE IS NOT SPLIT.
+
+This replaces Gini / entropy / variance reduction entirely. The split criterion
+is derived from your loss function and your regularization, not chosen from a
+menu.
+
+4.2 Worked example
+------------------
+A node with G = -20, H = 10. Candidate split, lambda = 1:
+
+    Left :  G_L = -15,  H_L = 4
+    Right:  G_R =  -5,  H_R = 6
+
+    left score    =  (-15)^2 / (4 + 1)   =  225 / 5   =  45.00
+    right score   =  ( -5)^2 / (6 + 1)   =   25 / 7   =   3.57
+    parent score  =  (-20)^2 / (10 + 1)  =  400 / 11  =  36.36
+
+    Gain = 0.5 * (45.00 + 3.57 - 36.36) - gamma
+         = 0.5 * 12.21 - gamma
+         = 6.10 - gamma
+
+    gamma = 0   ->  Gain = 6.10   ->  SPLIT
+    gamma = 5   ->  Gain = 1.10   ->  split, but only just
+    gamma = 10  ->  Gain = -3.90  ->  REJECTED
+
+And the leaf values that result:
+    w_L = 15/5 = 3.00      w_R = 5/7 = 0.71      (unsplit: 20/11 = 1.82)
+
+Notice the split was worth making because it SEPARATED the strongly-wrong rows
+(G_L=-15 over only H_L=4 of evidence) from the mildly-wrong ones. The gain
+formula is measuring exactly that: how much more extreme the two groups can be
+when allowed to disagree.
+
+4.3 gamma as a minimum bar
+--------------------------
+gamma (min_split_loss) is now easy to interpret: THE MINIMUM LOSS REDUCTION A
+SPLIT MUST EARN TO BE ALLOWED TO EXIST. It is pre-pruning with an economic
+meaning, in the same units as the loss.
+
+A subtlety people get wrong: XGBoost does not stop at the first node that fails
+the gamma test. It grows to max_depth and then prunes bottom-up, because a weak
+split can enable a strong one beneath it. Stopping greedily at the first
+negative gain would miss those.
+
+4.4 Why lambda in the denominator is clever
+-------------------------------------------
+Try the extreme case: a candidate split that isolates ONE row. Then H_L is tiny
+(say 0.01 for a confident row under log loss) and with lambda = 0 the score
+G_L^2/H_L explodes - the model would happily build a leaf per row. With
+lambda = 1 the denominator is 1.01 and the score is ordinary. lambda is what
+makes "split off this single weird row" unprofitable.
+
+
+================================================================================
+5) FINDING THE SPLITS: EXACT GREEDY VS APPROXIMATE
+================================================================================
+
+5.1 Exact greedy
+----------------
+For each feature: sort all the values, scan left to right accumulating G and H,
+evaluate the Gain at every possible threshold, keep the best.
+
+    Pros: considers every possible split. Optimal for one node.
+    Cons: needs the data sorted and in memory; cost is O(rows * features) per
+          node after the initial sort; does not distribute well, since no single
+          machine holds all the values of a feature.
+
+Fine up to a few million rows on one machine. tree_method='exact'.
+
+5.2 Approximate (and 'hist')
+----------------------------
+Do not test every threshold. PROPOSE A SET OF CANDIDATES - say 256 quantile
+points per feature - bucket the rows into them, and only evaluate those.
+
+    1,000,000 distinct values per feature  ->  256 candidate thresholds
+
+Accumulate G and H per bucket, then scan the buckets. The cost of finding a
+split drops from "rows" to "buckets", which is the single biggest speedup
+available.
+
+Two variants:
+    GLOBAL  - propose candidates once per tree, reuse at every node.
+              Fewer proposals, needs more of them to stay accurate.
+    LOCAL   - re-propose at every node, using only the rows in that node.
+              More work, but the candidates stay well-matched to the data in
+              deep nodes. Better for deep trees.
+
+Accuracy loss is usually negligible: you give up the ability to split between
+two nearly identical values, which was mostly noise anyway.
+
+5.3 The weighted quantile sketch
+--------------------------------
+Here is the subtle bit, and the part interviewers like.
+
+When choosing 256 quantile points, the obvious thing is EQUAL NUMBERS OF ROWS
+per bucket. XGBoost does not do that. It uses buckets of EQUAL TOTAL HESSIAN.
+
+Why: rewrite the objective by completing the square and you get, up to a
+constant,
+
+    SUM_i  0.5 * h_i * ( f_t(x_i) - (-g_i/h_i) )^2
+
+which is a WEIGHTED SQUARED-ERROR problem with weight h_i. So h_i is literally
+the importance of row i in this round's fitting problem. Rows with tiny h (the
+model is already confident about them) barely matter; rows with large h are
+where the decision is being made.
+
+Equal-count buckets would spend the same resolution on a region of 10,000
+already-solved rows as on a region of 10,000 genuinely uncertain ones. Equal-
+hessian buckets put the candidate thresholds where the model is still unsure -
+which is where a split can actually help.
+
+The second half of the contribution is engineering: a sketch data structure
+with provable error bounds that supports MERGE (combine sketches from different
+machines/blocks) and PRUNE (shrink without losing accuracy), so the quantiles
+can be computed in a distributed, streaming way. That is what makes approximate
+split finding usable on data that does not fit on one machine.
+
+
+================================================================================
+6) SPARSITY-AWARE SPLIT FINDING
+================================================================================
+
+6.1 The problem
+---------------
+Real data is full of holes and zeros:
+    - genuinely missing values (no survey response)
+    - one-hot encoded categoricals (99% zeros by construction)
+    - features that only exist for some rows (last_purchase_date for new users)
+
+Classic approaches: impute the mean (invents data and destroys the signal in
+missingness), add an is_missing indicator column (doubles the width), or use
+surrogate splits (expensive).
+
+6.2 The solution: learn a default direction
+-------------------------------------------
+Every split in XGBoost has THREE parts:
+
+    feature,  threshold,  DEFAULT DIRECTION
+
+Missing values are not imputed. They are routed, as a block, to whichever side
+the training data says is better.
+
+How the default is chosen: at each candidate split, only the non-missing rows
+are enumerated. The missing block is then tried BOTH ways -
+
+    (a) all missing rows go LEFT   -> compute Gain
+    (b) all missing rows go RIGHT  -> compute Gain
+
+- and the better of the two becomes the default direction stored in the node.
+It costs one extra pass, not a search.
+
+6.3 Why this is better than imputation
+--------------------------------------
+Because MISSINGNESS IS USUALLY INFORMATIVE. If income is missing mostly for
+unemployed applicants, "income is missing" is a strong predictor. Mean
+imputation deliberately destroys that signal by pretending those applicants have
+an average income. The default direction lets the model discover, split by
+split, which side missing rows belong on - and the answer can be different at
+different nodes.
+
+6.4 The speed consequence
+-------------------------
+The algorithm only ever ENUMERATES NON-MISSING ENTRIES. On a matrix that is 95%
+zeros, it does 5% of the work.
+
+    1M rows x 1,000 one-hot columns, 95% sparse
+    dense scan:  1,000,000,000 entries
+    sparse-aware:   50,000,000 entries        -> 20x fewer
+
+The XGBoost paper reports roughly a 50x speedup on sparse datasets from this
+alone. Note that the same mechanism treats explicit zeros in a sparse matrix the
+same way as missing - which is usually what you want for one-hot data, and
+occasionally a trap if zero is a meaningful value stored sparsely.
+
+
+================================================================================
+7) THE ENGINEERING BEHIND THE SPEED
+================================================================================
+
+XGBoost's accuracy edge over plain GBM is modest. Its SPEED edge was enormous,
+and the speed is what let people run 10x more experiments.
+
+7.1 Column blocks (the big one)
+-------------------------------
+Sorting is the dominant cost in tree building, and the naive algorithm re-sorts
+at every node of every tree.
+
+XGBoost stores the data ONCE in compressed-column (CSC) blocks, with each column
+PRE-SORTED by feature value and holding a pointer back to the row's gradient.
+That sort is paid for once, before training, and reused by every node of every
+tree for the entire run.
+
+Consequences:
+  - Split finding over different COLUMNS becomes independent work, so it
+    parallelises across threads cleanly. This is the main parallelism in
+    XGBoost (remember from foundations.txt section 6 that the ROUNDS cannot be
+    parallelised - this is the within-tree parallelism that compensates).
+  - Blocks can be sharded across machines for distributed training.
+
+7.2 Cache-aware access
+----------------------
+The pre-sorted column gives you row indices in feature order, but the gradients
+g and h are stored in row order. So reading them is a random-access scatter -
+every lookup risks a cache miss, and that dominates runtime on large data.
+
+Fixes used:
+  - For exact greedy: a per-thread internal buffer that prefetches gradients
+    into a contiguous mini-batch before accumulating. Roughly 2x on large
+    datasets.
+  - For approximate: choose the block size carefully (around 2^16 rows). Too
+    big and the gradient working set falls out of cache; too small and you lose
+    parallel efficiency.
+
+This is unglamorous work, and it is a large fraction of why XGBoost was faster
+than its competitors at the same accuracy.
+
+7.3 Out-of-core computation
+---------------------------
+To train on data bigger than RAM:
+  - BLOCK COMPRESSION - columns are compressed on disk and decompressed by a
+    separate thread on the fly, trading spare CPU for scarce disk bandwidth.
+  - BLOCK SHARDING - spread blocks across multiple disks with a prefetch thread
+    per disk, so reads happen in parallel.
+
+7.4 The honest summary of section 7
+-----------------------------------
+Sections 1-4 are the ALGORITHM contribution (regularized objective, Newton
+steps, derived split gain). Section 6 is a genuinely clever modelling idea.
+Section 7 is systems engineering. The paper is famous because it did all three
+at once - and in practice, "it is 10x faster so I tried 10x more ideas" was
+worth more to users than the accuracy delta.
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+XGBoost writes one regularized objective - loss plus gamma per leaf plus
+0.5*lambda*||w||^2 - and derives the entire tree-building procedure from it.
+Approximating the loss with a second-order Taylor expansion reduces each round
+to two numbers per row, the gradient g and the hessian h, which makes any
+twice-differentiable loss pluggable and turns each step into a Newton step
+rather than a plain gradient step. Grouping that quadratic by leaf gives the
+optimal leaf weight w* = -G/(H+lambda) and the leaf score G^2/(H+lambda), and
+the difference in leaf score before and after a cut, minus gamma, IS the split
+criterion - so Gini and entropy are replaced by something derived from your
+actual loss and your actual regularization. For scale it swaps exhaustive split
+scanning for quantile candidates chosen by a weighted quantile sketch that makes
+buckets of equal HESSIAN rather than equal row count, because h is literally the
+weight each row carries in that round's fitting problem. Missing and zero
+entries are never imputed: each split learns a default direction by trying both
+sides, which preserves the signal in missingness and lets the algorithm skip
+95% of a sparse matrix. The rest is systems work - pre-sorted column blocks
+reused across every node of every tree, cache-aware gradient prefetching, and
+compressed sharded blocks for out-of-core training - and that speed, more than
+the accuracy, is what made it the default.

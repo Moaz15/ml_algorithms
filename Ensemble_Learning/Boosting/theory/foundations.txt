@@ -1,0 +1,547 @@
+BOOSTING - 1.1 FOUNDATIONS
+================================================================================
+THE WHOLE IDEA IN ONE STORY
+---------------------------
+You are preparing for an exam.
+
+  Bagging:  take 100 practice tests at once and average the scores. A more
+            stable estimate of how you will do - but you never look at what you
+            got wrong, so you do not actually get better.
+  Boosting: take one test, mark the questions you got wrong, study ONLY those,
+            take another test, mark the new mistakes. Repeat 500 times.
+
+Bagging makes your performance less noisy; boosting makes you better. Boosting
+is a long chain of small models, each trained on what the chain so far is still
+getting wrong - why that is necessary (1), why the small models are allowed to
+be bad (2), how the chain is built (3), what they should be (4), what it does to
+overfitting (5), what it costs in training time (6).
+
+Vocabulary used throughout:
+  base learner / weak learner  - the small model added at each step (a tree)
+  round / stage / iteration    - one step of the chain (one new tree)
+  ensemble                     - the running sum of all trees so far
+  residual / error             - how far the ensemble still is from the truth
+  M (or n_estimators)          - total number of rounds
+  nu (or learning_rate)        - how much of each new tree we actually keep
+
+================================================================================
+1) THE VARIANCE FLOOR: WHAT AVERAGING CANNOT FIX
+================================================================================
+
+1.1 The instability, and why averaging helps
+--------------------------------------------
+Predicting house prices, true price 500k. Train ONE decision tree on 2,000 past
+sales, then retrain it on different random samples of those sales:
+
+    sample 1 -> 512k    sample 2 -> 478k    sample 3 -> 531k    sample 4 -> 465k
+
+Tens of thousands of swing purely from which rows were drawn. That is VARIANCE:
+the tree being unstable, not the market. Average the four and you get 496.5k,
+much closer to 500k than most of the individuals. That is bagging, and it
+genuinely works.
+
+1.2 Why it stops working
+------------------------
+All four trees read bootstrap samples of the SAME 2,000 sales, so any two share
+about 63% of their rows. They are not four independent opinions - they are four
+slightly different readings of the same book. If those 2,000 sales happen to
+contain almost no houses near the new metro line, then EVERY tree under-prices
+houses near the metro line, and averaging 500 trees that all make the same
+mistake just gives you that mistake.
+
+    Averaging only cancels the errors the models DISAGREE on.
+
+1.3 Splitting a tree's miss into two parts
+------------------------------------------
+Every miss (true price 500k) is two different things added together:
+
+    THE SHARED PART  - the mistake EVERY tree makes, because it comes from the
+                       training data they all read: the metro-line problem from
+                       1.2. Nobody disagrees about it. Say it is -10 for all.
+    THE PRIVATE PART - the mistake THIS tree makes on its own, from which rows
+                       its bootstrap sample grabbed and which splits it picked.
+
+    tree 1:  +12  =  (-10 shared)  +  (+22 private)
+    tree 2:  -22  =  (-10 shared)  +  (-12 private)
+    tree 3:  +31  =  (-10 shared)  +  (+41 private)
+    tree 4:  -35  =  (-10 shared)  +  (-25 private)
+
+Average the four and watch the two parts separately:
+
+    PRIVATE:  +22, -12, +41, -25. Mixed signs, so they partly cancel: their
+              average is +6.5, much smaller than any one of them, and they
+              cancel further as more trees are added.
+    SHARED:   -10, -10, -10, -10. Averaging four copies of -10 gives you -10.
+              It does not move AT ALL.
+
+That is the entire idea. AVERAGING IS A MACHINE THAT CANCELS DISAGREEMENT, and
+the shared part is exactly the part the trees do not disagree about. No number
+of trees can cancel it.
+
+1.4 Now the formula writes itself
+---------------------------------
+Give the two parts names and the standard formula falls out with no algebra.
+
+    sigma^2 = the total wobble of ONE tree (the spread of 512/478/531/465)
+    rho     = the FRACTION of that wobble which is the shared part, in [0,1]
+
+By the definition of "fraction", one tree's wobble splits as
+
+        shared  piece  =       rho   * sigma^2
+        private piece  =   (1 - rho) * sigma^2
+                           ---------------------
+        total          =             sigma^2
+
+Now average B trees and apply 1.3 to each piece: the shared piece is identical
+in every tree, so averaging leaves it exactly as it was, while the private piece
+is B independent wobbles, and averaging B independent things divides variance
+by B.
+
+    Var( average of B trees )  =  rho * sigma^2  +  (1 - rho) * sigma^2 / B
+                                  \___________/    \____________________/
+                                   the VARIANCE      the only thing more
+                                   FLOOR, untouched  trees can buy you
+
+(One standard fact was used: averaging B INDEPENDENT things divides variance by
+B - the usual "an average of many measurements is more stable than one". It
+applies only to the independent part, which is the whole point of this section.)
+
+    A note on rho: textbooks define rho as the CORRELATION between any two
+    trees' predictions, not as "the fraction that is shared". Both give the same
+    number - the only reason two trees move together is the part of the error
+    they share. In bagging rho is high, since any two trees share about 63% of
+    their rows; Random Forest's feature subsampling exists to push rho down.
+
+1.5 Putting numbers in it (sigma^2 = 1)
+---------------------------------------
+    rho = 0.0, B = 100       ->  0.010      (the dream: independent trees)
+    rho = 0.6, B = 10        ->  0.600 + 0.400/10     = 0.640
+    rho = 0.6, B = 100       ->  0.600 + 0.400/100    = 0.604
+    rho = 0.6, B = 10,000    ->  0.600 + 0.400/10,000 = 0.60004
+    rho = 0.6, B = infinity  ->  0.600                <- the floor
+
+Six tenths of each tree's wobble is the shared mistake, so 0.600 of the variance
+is untouchable from the start and all the trees in the world only ever chip away
+at the remaining 0.400. Going from 100 trees to 10,000 - a hundred times the
+compute - improves the variance by 0.004. By 100 trees you are already sitting
+on the floor.
+
+That is why Random Forest subsamples FEATURES. It is not trying to add more
+trees to the second term; it is trying to make rho smaller, which lowers the
+floor itself. Drop rho from 0.6 to 0.3 and the floor halves - worth far more
+than any number of extra trees.
+
+1.6 The part the formula does not show, and the real reason boosting exists
+---------------------------------------------------------------------------
+    E[ average of B trees ]  =  E[ one tree ]
+
+Averaging does not change the EXPECTED prediction at all: whatever the base
+model systematically gets wrong, the ensemble systematically gets wrong. Make it
+concrete. The truth is curved - price rises steeply up to 2,000 sqft and then
+flattens - but your base model is a straight-line fit. Bag 1,000 of them on
+1,000 bootstrap samples. Each is a straight line, and the average of 1,000
+straight lines is a straight line. It still cannot bend. You have removed the
+wobble and kept the error.
+
+That gap between what your model can express and the truth is BIAS, and:
+
+    bagging   ->  pushes the variance term down, leaves bias exactly where it is
+    boosting  ->  pushes the bias down, and pays for it with variance
+
+Two different diseases, two different medicines.
+
+================================================================================
+2) WEAK LEARNERS: BEATING RANDOM GUESSING IS ENOUGH
+================================================================================
+
+2.1 The example
+---------------
+Spam classification, with the dumbest possible model - one yes/no question:
+
+    "Does the email contain the word FREE?"  -> if yes, spam; if no, not spam
+
+Run it on your inbox: right 58% of the time, against coin-flipping's 50%. Almost
+worthless - an edge of 8 percentage points over guessing. That one-question
+model is a DECISION STUMP, and it is a textbook WEAK LEARNER.
+
+2.2 The definition
+------------------
+A weak learner only has to satisfy:
+
+    error  <=  0.5 - gamma       for some gamma > 0   (binary, balanced classes)
+
+gamma is called the EDGE: how far below coin-flipping the model manages to get.
+The FREE rule is wrong 42% of the time, so its edge is gamma = 0.08. That is the
+entire bar. A STRONG learner, by contrast, is one you can push to arbitrarily
+small error.
+
+The founding result of the field (Schapire, 1990): WEAK AND STRONG LEARNABILITY
+ARE EQUIVALENT. Anything that reliably beats a coin flip can be combined into a
+model with arbitrarily small training error. Boosting is the recipe that does
+it.
+
+2.3 Why such a bad model is enough
+----------------------------------
+Because the next weak learner is not asked the same question on the same data.
+It is asked to fix what is left over.
+
+    Round 1: "contains FREE?"          -> 58% accurate.
+             Now look only at the emails it got wrong. Many of those are real
+             spam that never says FREE.
+    Round 2: trained with those rows weighted up, the best question becomes
+             "is the sender not in my contacts?"  -> catches a different slice.
+    Round 3: among what is STILL wrong -> "more than 5 links?"
+    Round 4: -> "subject in ALL CAPS?"
+
+Each rule is individually terrible. Each one covers a slice the others missed.
+The ensemble asks all of them and takes a weighted vote.
+
+2.4 The wrong mental model, and the right one
+---------------------------------------------
+THE WRONG ONE (adding). "Each rule is 8 points better than a coin flip, so 200
+rules are 200 x 8 = 1,600 points better." Obviously nonsense - accuracy stops at
+100%. Edges do not add up.
+
+THE RIGHT ONE (multiplying). A round does not remove a fixed AMOUNT of error, it
+removes a fixed FRACTION OF WHATEVER ERROR IS LEFT - like a water filter taking
+out 2% of the REMAINING dust on each pass:
+
+    start          100.0% of the dust
+    after 1 pass    98.0%          (2% of 100)
+    after 2 passes  96.0%          (2% of 98, not another 2 of the original)
+    after 10        81.7%
+    after 50        36.4%
+    after 200        1.8%
+
+You do not compute "200 passes x 2% = 400% removed", you compute 0.98^200 - and
+a number slightly below 1 multiplied by itself a few hundred times collapses.
+
+WHY BOOSTING BEHAVES LIKE THE FILTER, AND NOT LIKE ADDITION
+Because of the reweighting in 2.3: after round 1 the rows it got right are
+discounted and the rows it got wrong carry the weight. (In AdaBoost this is
+exact - the misclassified rows end up holding precisely half the total weight,
+see adaboost.txt section 1.3.) So each round works on a smaller problem than the
+one before it:
+
+    round 1 attacks  100% of the difficulty, removes a slice
+    round 2 attacks  WHAT REMAINS,           removes a slice of that
+    round 3 attacks  WHAT REMAINS OF THAT,   ...
+
+Fractions of fractions of fractions. That is a product, and a product of numbers
+below 1 decays exponentially. THIS is why 8-point edges are enough: they do not
+need to add up to 50, they need to multiply down to nothing.
+
+2.5 The formula, and what it buys
+---------------------------------
+The precise version of the filter picture - one round multiplies the remaining
+training error by a computable factor, and the shape of the table is the whole
+story:
+
+    factor for one round  =  2 * sqrt( err * (1 - err) )
+
+    err = 0.50  ->  factor = 1.000     a coin flip removes NOTHING
+    err = 0.45  ->  factor = 0.995
+    err = 0.40  ->  factor = 0.980     our 60%-accurate rule
+    err = 0.35  ->  factor = 0.954
+    err = 0.30  ->  factor = 0.917
+    err = 0.20  ->  factor = 0.800
+    err = 0.10  ->  factor = 0.600
+    err = 0.01  ->  factor = 0.199     a near-perfect rule ends it almost alone
+
+At err = 0.5 the factor is exactly 1.0, so a useless learner leaves the error
+untouched - and the algorithm agrees, giving that learner a vote of zero
+(adaboost.txt section 2.1). "Beat a coin flip" is just "make the factor smaller
+than 1". Multiply the factors across all rounds and you get AdaBoost's training
+error bound:
+
+    training error  <=  PROD_m  2 * sqrt( err_m * (1 - err_m) )
+
+    60%-accurate rules (err = 0.40, factor 0.9798):
+         50 rounds  =  0.9798^50   =  0.36      -> training error below 36%
+        200 rounds  =  0.9798^200  =  0.017     -> training error below 1.7%
+    65%-accurate rules (err = 0.35, factor 0.9539):
+        200 rounds  =  0.9539^200  =  0.00008   -> training error below 0.01%
+
+Two hundred rules, each barely better than guessing, classify the training set
+essentially perfectly. And notice how much that tiny per-rule improvement gained
+- which the tidier form of the bound explains:
+
+    with err = 0.5 - gamma, the factor is exactly  sqrt( 1 - 4*gamma^2 )
+
+    so       training error  <=  exp( -2 * SUM_m gamma_m^2 )
+
+THE EDGE ENTERS SQUARED. Doubling the edge quadruples the exponent: gamma = 0.1
+decays as exp(-0.02*M), gamma = 0.2 as exp(-0.08*M) - four times faster.
+Slightly better weak learners are worth much more than slightly more of them.
+
+2.6 The catch (say this in an interview)
+----------------------------------------
+That bound is about TRAINING error. It says nothing about test error - perfectly
+fitting the training set is also what overfitting looks like. Why boosted models
+often still generalise well is a separate argument (margins), in adaboost.txt.
+
+One more practical reason weak is good: a weak learner is cheap, so you can
+afford 1,000 rounds, and it cannot swallow all the signal in one step - which is
+what keeps rounds 2..1000 worth running.
+
+
+================================================================================
+3) ADDITIVE STAGEWISE FITTING: ONE TERM AT A TIME, NEVER REVISITED
+================================================================================
+
+3.1 The shape of the model
+--------------------------
+A boosted model is a SUM of small models:
+
+    F_M(x)  =  F_0(x)  +  nu*h_1(x)  +  nu*h_2(x)  +  ...  +  nu*h_M(x)
+
+F_0 is a constant starting guess. Each h_m is one small tree. nu is the
+LEARNING RATE (shrinkage), typically 0.01 to 0.1 - we deliberately keep only a
+fraction of each tree's advice.
+
+3.2 Worked example: three houses
+--------------------------------
+Three houses, true prices 300k / 400k / 500k. Use nu = 0.1. Start with the mean.
+
+  Round 0:  F_0 = 400 for everyone (the best single number).
+            errors (residuals):   A: -100     B: 0     C: +100
+
+  Round 1:  Fit a small tree to those residuals. Say it predicts -100 / 0 / +100
+            (it sees the pattern perfectly).
+            We do NOT add all of it. We add nu * tree = -10 / 0 / +10.
+            F_1 =  390 / 400 / 410
+            new residuals:        A: -90      B: 0     C: +90
+
+  Round 2:  Fit a tree to the NEW residuals -> -90 / 0 / +90.
+            Add nu * tree = -9 / 0 / +9.
+            F_2 =  381 / 400 / 419
+            new residuals:        A: -81      B: 0     C: +81
+
+Each round closes 10% of the remaining gap. Tracking house A:
+
+    round      0      1      2      5     10     22     50
+    F(A)   400.0  390.0  381.0  359.0  334.9  309.8  300.5
+    gap    100.0   90.0   81.0   59.0   34.9    9.8    0.5
+
+It takes about 22 rounds to close 90% of the gap, and 50 to get essentially
+there. That slowness is not a bug. It IS the regularization - see section 5.
+
+3.3 The two words that matter
+-----------------------------
+The general recipe (FORWARD STAGEWISE ADDITIVE MODELLING):
+
+    F_0(x)   = the constant that minimises the loss over all rows
+    for m = 1..M:
+        (beta_m, h_m) = argmin over (beta, h) of
+                            SUM_i  L( y_i ,  F_(m-1)(x_i) + beta * h(x_i) )
+        F_m(x)        = F_(m-1)(x) + nu * beta_m * h_m(x)
+
+GREEDY - at each round you solve one small easy problem: fit ONE tree against
+the current errors. You never try to choose all 500 trees jointly, which would
+be computationally hopeless.
+
+STAGEWISE - once a tree is in, it is FROZEN. In the example above, tree 1
+contributed -10 to house A. Round 40 cannot go back and say "tree 1, you were
+too aggressive, shrink yourself". The only thing later trees can do is add a
+correction on top of it.
+
+Two alternatives exist, and naming them is useful:
+  - Fully corrective boosting / backfitting: re-optimise ALL existing trees'
+    weights every round. Fits the training set faster, overfits faster, costs
+    much more.
+  - Stepwise regression: re-estimates every coefficient when a new variable
+    enters. Same idea, and NOT what boosting does.
+
+Freezing is not a compromise to apologise for - it is a regularizer. Small
+steps that are never undone trace a slow, cautious path through model space.
+(Hastie et al. show this path is very close to the lasso / L1 solution path.)
+
+
+================================================================================
+4) WHY THE BASE LEARNER IS A SHALLOW TREE
+================================================================================
+
+Boosting wants a base learner that is high-bias, low-variance and cheap. A tree
+of depth 1-6 is all three. Each reason has a concrete failure behind it.
+
+4.1 High bias is the POINT, not a compromise
+--------------------------------------------
+Suppose you use a fully grown tree instead - deep enough to give nearly every
+training row its own leaf. Round 1:
+
+    residuals going in:   -100, 0, +100, -45, +62, ...
+    the deep tree fits:   -100, 0, +100, -45, +62, ...   (exactly)
+    residuals coming out:    0, 0,    0,   0,   0, ...
+
+There is nothing left for round 2. You have not built an ensemble of 500 trees,
+you have built one gigantic overfitted tree with 499 useless trees attached.
+Boosting only works if each step is DELIBERATELY INADEQUATE and leaves work for
+the next one.
+
+4.2 Low variance matters because nothing averages the noise away
+----------------------------------------------------------------
+In bagging the trees are AVERAGED, so a wild tree gets diluted by 499 others. In
+boosting the trees are SUMMED. A tree that chased a noisy outlier contributes
+that mistake to the final prediction forever. There is no cleanup step.
+
+4.3 Cheap matters because you need hundreds of them
+---------------------------------------------------
+M is 500 - 5,000. Half a second per tree is 40 minutes of training. Cost per
+tree multiplies straight through.
+
+4.4 Depth = how many features are allowed to interact (the overlooked one)
+--------------------------------------------------------------------------
+This is the most useful way to think about max_depth.
+
+    A STUMP (depth 1) can only say:
+        "4+ bedrooms          ->  +50k"
+
+    It can NEVER say:
+        "4+ bedrooms AND good school district  ->  +120k"
+
+    because that needs two questions stacked - depth 2.
+
+So:
+    depth 1  ->  no interactions at all. The ensemble becomes
+                 f(x) = f_1(bedrooms) + f_2(size) + f_3(district) + ...
+                 a GENERALISED ADDITIVE MODEL - you can literally plot the
+                 learned effect of each feature on its own.
+    depth 2  ->  pairwise interactions
+    depth d  ->  up to d-way interactions
+
+Typical settings: max_depth 3-6 for XGBoost-style GBDT (or num_leaves around 31
+for LightGBM's leaf-wise growth). Pick depth 1 when you want an interpretable
+additive model; go deeper only when you believe real multi-way interactions
+exist.
+
+4.5 Why trees and not something else
+------------------------------------
+No feature scaling needed, mixed numeric/categorical features are fine,
+invariant to monotone transforms of a feature (log(size) splits the same way as
+size), and missing values can be handled inside the split rule (xgboost.txt).
+
+
+================================================================================
+5) BOOSTING ATTACKS BIAS, BAGGING ATTACKS VARIANCE
+================================================================================
+
+5.1 Side by side
+----------------
+                       BAGGING / RANDOM FOREST      BOOSTING
+--------------------------------------------------------------------------
+How trees are built    independently, in parallel,  sequentially, each on the
+                       on bootstrap samples         previous ensemble's errors
+Attacks                variance                     bias
+Base learner wanted    low bias, high variance      high bias, low variance
+                       -> DEEP trees                -> SHALLOW trees
+Combined by            averaging / voting           weighted sum
+More trees             safe, curve just flattens    eventually OVERFITS
+Tuning                 forgiving                    sensitive (nu, M, depth)
+Noisy labels           robust (noise averages out)  fragile (noise gets chased)
+Parallel training      yes, trivially               no (section 6)
+
+5.2 The consequence that gets asked about: where overfitting is controlled
+--------------------------------------------------------------------------
+In bagging, overfitting is handled by the averaging itself. B is not really a
+tuning parameter - set it as high as your compute allows:
+
+    Random Forest, house price, validation RMSE (thousands):
+        50 trees  -> 44.0
+       200 trees  -> 42.0
+     1,000 trees  -> 41.3
+     5,000 trees  -> 41.2        flat. More trees never made it worse.
+
+In boosting, M IS a regularization parameter. Training loss goes down EVERY
+round by construction, so training loss tells you nothing at all. Validation
+error traces a U:
+
+    GBDT, same data, RMSE (thousands):
+        rounds    train     validation
+            50       62         66
+           200       41         48
+           600       28         41
+         1,200       19         39     <- best, stop here
+         2,000       12         40
+         5,000        4         46     <- clearly overfitting now
+
+Training RMSE 4 and validation RMSE 46 is the model memorising the training
+rows. If you had only watched the training curve you would have concluded the
+model was getting better the whole time.
+
+5.3 What this means in practice
+-------------------------------
+  - nu and M trade off directly. Halving the learning rate roughly doubles the
+    number of rounds you need. Small nu + large M + early stopping is the
+    standard safe recipe.
+  - The only honest way to choose M is EARLY STOPPING on a validation set:
+    keep training while validation improves, stop after it has failed to
+    improve for N rounds, keep the best iteration. Never hard-code M.
+  - The flat bottom of that U can be very long with a small nu, which is where
+    the myth "boosting does not overfit" comes from. It is a myth. See
+    failure_modes.txt.
+
+
+================================================================================
+6) SEQUENTIAL DEPENDENCE: WHY YOU CANNOT PARALLELISE ACROSS TREES
+================================================================================
+
+6.1 The reason
+--------------
+Go back to the practice-test story. You cannot study the mistakes from test 2
+before you have sat test 2. And you cannot sit test 2 meaningfully before
+studying the mistakes from test 1.
+
+Same thing formally - tree m is fitted to targets DEFINED BY trees 1..m-1:
+
+    AdaBoost          -> the row weights depend on what F_(m-1) got wrong
+    Gradient boosting -> the targets are -dL/dF evaluated at F_(m-1)
+
+Tree 300's training targets do not exist until tree 299 is finished. This is a
+genuine data dependency, not an implementation detail, so no amount of hardware
+removes it.
+
+Bagging has the opposite structure: all B bootstrap samples exist up front, so
+B trees can be trained on B machines at once.
+
+    Random Forest, 1,000 trees at 0.4s each, 8 cores:
+        1,000 * 0.4 / 8   ~=  50s          (scales with cores)
+
+    GBDT, 1,000 rounds at 0.4s each, 8 cores:
+        the 1,000 rounds stay strictly one after another.
+        What the 8 cores do is make each ROUND faster - say 0.4s -> 0.08s:
+        1,000 * 0.08      ~=  80s          (and that floor cannot be removed)
+
+6.2 What CAN still be parallelised (standard follow-up question)
+----------------------------------------------------------------
+Plenty, and this is why modern libraries are fast despite being sequential:
+
+  - Split finding WITHIN one tree: all features can be scanned at once, and all
+    candidate split points within a feature. This is where XGBoost's column
+    blocks and LightGBM's histograms get their speed.
+  - Gradient and hessian computation: one independent number per row, so it
+    parallelises across rows and across machines.
+  - Histogram building per feature, then a reduce across workers.
+  - Sibling nodes at the same depth of one tree are independent of each other.
+  - PREDICTION: F(x) = SUM_m h_m(x). At inference the trees are independent and
+    can be summed in any order, on any number of cores.
+  - Everything around the fit: CV folds, hyperparameter search, and in
+    multiclass the K trees of a single round (one per class).
+
+So "boosting is sequential" is true at the level of ROUNDS only. In practice a
+modern GBDT library will happily saturate your machine; what the serial chain
+imposes is a wall-clock floor that extra cores cannot push through.
+
+
+================================================================================
+THE ONE-PARAGRAPH SUMMARY
+================================================================================
+Averaging many similar models drives variance down to a floor of rho*sigma^2 and
+leaves bias exactly where it was - 1,000 straight lines still cannot fit a
+curve. Boosting goes after the bias instead: fit a deliberately weak, cheap
+model (a shallow tree), add a small fraction of it to the running sum, freeze
+it, then fit the next one to whatever the sum is still getting wrong. Hundreds
+of tiny corrections compose into a low-bias model - and because the errors being
+corrected are a product, not a sum, learners barely better than coin flips
+compound into near-perfect training fit. The bill comes in three parts: the
+rounds are strictly sequential, noise gets chased instead of averaged away, and
+the number of rounds becomes a regularization parameter you must early-stop on.

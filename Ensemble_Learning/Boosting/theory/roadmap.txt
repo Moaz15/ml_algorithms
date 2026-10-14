@@ -1,0 +1,73 @@
+BOOSTING -
+---------------------------------------------------------------------------------------------------------------------------------
+
+1.1 Foundations  ->  foundations.txt
+- [   ] The variance floor: Var = rho*sigma^2 + (1-rho)*sigma^2/B, and what averaging cannot fix
+- [   ] Weak learner: a model that only has to beat random guessing, and why that is enough
+- [   ] Additive stagewise fitting: F_m = F_(m-1) + nu * h_m, one term at a time, never revisited
+- [   ] Why the base learner is a shallow tree: high bias, low variance, cheap to fit
+- [   ] Boosting attacks bias, bagging attacks variance, and what that changes about overfitting
+- [   ] Sequential dependence: why boosting cannot be parallelised across trees
+
+1.2 AdaBoost  ->  adaboost.txt
+- [   ] The algorithm: reweight the rows the last learner got wrong, then take a weighted vote
+- [   ] The learner weight alpha = 0.5 * ln((1 - err) / err), and how it behaves as err moves
+- [   ] AdaBoost is forward stagewise additive modelling under exponential loss
+- [   ] Why exponential loss makes AdaBoost fragile to label noise and outliers
+- [   ] Why test error can keep falling after training error hits zero: the margin explanation
+- [   ] Multiclass AdaBoost: SAMME and SAMME.R
+
+1.3 Gradient Boosting  ->  gradient_boosting.txt
+- [   ] The reframe: boosting as gradient descent in function space
+- [   ] Pseudo-residuals: fit the next tree to the negative gradient, not to the raw error
+- [   ] The full loop: constant init, pseudo-residuals, fit a tree, solve leaf values, update
+- [   ] Squared loss as the special case where the pseudo-residual is exactly the residual
+- [   ] Leaf values are re-solved against the real loss, not inherited from the tree's split fit
+- [   ] Swapping the loss: absolute error, Huber, log loss, Poisson, and what each one buys
+- [   ] From scores to probabilities: the logit link, and why multiclass costs K trees a round
+
+1.4 Regularization and Tuning  ->  regularization_and_tuning.txt
+- [   ] Shrinkage: the learning rate, and the trade against the number of trees
+- [   ] Early stopping on a validation set: the honest way to pick n_estimators
+- [   ] Row and column subsampling, and how they differ from bagging's bootstrap
+- [   ] Tree-size limits: max_depth, num_leaves, min_child_weight, min_samples_leaf
+- [   ] L1 and L2 penalties on the leaf weights
+- [   ] Monotonic and interaction constraints as priors you can force on the model
+- [   ] A tuning order that works, and which knobs actually move the number
+
+1.5 XGBoost  ->  xgboost.txt
+- [   ] The regularized objective: loss + gamma * (number of leaves) + 0.5 * lambda * ||w||^2
+- [   ] Second-order Taylor expansion: what g and h are, and what the second order buys
+- [   ] The optimal leaf weight w* = -G / (H + lambda), falling straight out of that objective
+- [   ] The split gain formula, and gamma as the minimum gain a split has to earn
+- [   ] Exact greedy vs the approximate algorithm and the weighted quantile sketch
+- [   ] Sparsity-aware split finding: learning a default direction for missing values
+- [   ] The engineering behind the speed: column blocks, cache-aware access, out-of-core
+
+1.6 LightGBM and CatBoost  ->  lightgbm_catboost.txt
+- [   ] Histogram binning: what bucketing the features does to the cost of split finding
+- [   ] Leaf-wise vs level-wise growth, and why leaf-wise overfits more readily
+- [   ] GOSS: keep the large-gradient rows, subsample the rest
+- [   ] EFB: bundling mutually exclusive sparse features into one
+- [   ] CatBoost's target statistics for categoricals, and the leakage they have to dodge
+- [   ] Ordered boosting and the prediction shift it exists to remove
+- [   ] Oblivious (symmetric) trees and what they buy at inference time
+- [   ] Choosing between XGBoost, LightGBM and CatBoost
+
+1.7 Failure Modes and Traps  ->  failure_modes.txt
+- [   ] Boosting does overfit: where the "boosting cannot overfit" myth comes from
+- [   ] Label noise and outliers: how the choice of loss decides how badly it hurts
+- [   ] No extrapolation: the output is still a sum of leaf constants
+- [   ] Class imbalance: scale_pos_weight, threshold tuning, and why resampling fights the loss
+- [   ] Calibration: when a boosted score can be read as a probability and when it cannot
+- [   ] Importance types disagree: gain vs cover vs weight, and what to trust instead
+- [   ] Categoricals gone wrong: high cardinality, one-hot blowup, leaky target encoding
+
+1.8 Comparisons and Interview Gotchas  ->  comparisons_and_gotchas.txt
+- [   ] Random Forest vs GBDT: accuracy, tuning sensitivity, training cost, what to ship
+- [   ] Why boosting wants shallow trees and Random Forest wants deep ones
+- [   ] AdaBoost vs gradient boosting: is one a special case of the other
+- [   ] Gradient boosting vs deep learning on tabular data
+- [   ] What you get if the base learner is a linear model instead of a tree
+- [   ] Explaining XGBoost's edge over plain gradient boosting in two minutes
+- [   ] What can still be parallelised when the trees themselves are sequential
